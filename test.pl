@@ -1,46 +1,50 @@
 use strict;
 use warnings;
 use Win32::MMF;
-
-my $swapfile = undef;  # use Windows system swap file
-my $namespace = 'MyMMF.MyString';
+use Data::Dumper;
+use CGI;   # for testing of inter-process object transportation
 
 # fork a process
 defined(my $pid = fork()) or die "Can not fork a child process!";
 
 if ($pid) {
-    # in parent
-    
-    # claim a namespace of default 64K size
-    my ($swap, $ns) = ClaimNamespace($swapfile, $namespace);
+    my $ns1 = Win32::MMF->new ( -namespace => "My.data1" );
+    my $ns2 = Win32::MMF->new ( -namespace => "My.data2" );
 
-    # create a view of 100 bytes inside the namespace
-    my $view = MapViewOfFile($ns, 0, 100);
+    my $cgi = new CGI;
+    my $data = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
 
-    my $str = "This is a test";
+    $ns1->write($data);
+    $ns2->write($cgi);
 
-    print "Write: $str\n";
-    Poke($view, $str, length($str));
+    print "--- Sent ---\n";
+    print Dumper($data), "\n";
+    print Dumper($cgi), "\n";
 
-    sleep(3);
+    sleep(1);
 
-    UnmapViewOfFile($view);
-    ReleaseNamespace($swap, $ns);
 } else {
+
     # in child
+    sleep(1);
+    my $ns1 = Win32::MMF->new ( -namespace => "My.data1",
+                                -nocreate => 1 )
+            or die "Namespace does not exist!";
 
-    sleep(1);   # wait for parent to finish writing
+    my $ns2 = Win32::MMF->new ( -namespace => "My.data2",
+                                -nocreate => 1 )
+            or die "Namespace does not exist!";
 
-    # use an existing namespace
-    my $ns = UseNamespace($namespace) or die "Namespace $namespace not found";
+    my $data = $ns1->read();
+    my $cgi = $ns2->read();
 
-    # create a view of 100 bytes inside the namespace
-    my $view = MapViewOfFile($ns, 0, 100);
-
-    my $str = Peek($view);
-    print "Read: $str\n";
-
-    UnmapViewOfFile($view);
-    ReleaseNamespace(undef, $ns);
+    print "--- Received ---\n";
+    print Dumper($data), "\n";
+    print Dumper($cgi), "\n";
+    
+    print "--- Use Received Object ---\n";
+    # use the object from another process :-)
+    print $cgi->header(),
+          $cgi->start_html(), "\n",
+          $cgi->end_html(), "\n";
 }
-

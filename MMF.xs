@@ -7,9 +7,12 @@
  *      Roger Lee
  *      Copyright (C) 2004. All Rights Reserved.
  *
- * $Id: MMF.xs,v 1.1 2004/02/05 15:06:03 Roger Lee Exp $
+ * $Id: MMF.xs,v 1.2 2004/02/06 15:45:58 Roger Lee Exp $
  * ---
  * $Log: MMF.xs,v $
+ * Revision 1.2  2004/02/06 15:45:58  Roger Lee
+ * Removed mmf_* prefix from function names, added Windows semaphore support.
+ *
  * Revision 1.1  2004/02/05 15:06:03  Roger Lee
  * Initial release of Win32::MMF.
  *
@@ -192,8 +195,9 @@ CODE:
     if (!szMemoryMapFileHandle) {
         XSRETURN_UNDEF;
     }
-    
+
     mem = MapViewOfFile((HANDLE) szMemoryMapFileHandle, FILE_MAP_WRITE, 0, offset, size);
+
     if (mem == NULL) {
         XSRETURN_UNDEF;
     }
@@ -277,6 +281,80 @@ CODE:
         }
         RETVAL = newSVpvn((LPVOID)(((IV *)szView)+1), size);
      }
+}
+OUTPUT:
+    RETVAL
+
+
+IV CreateSemaphore(IV initCount, IV maxCount, char *szNameSpace)
+PREINIT:
+    dMY_CXT;
+    HANDLE hSemaphore;
+CODE:
+{
+    if (initCount < 0 || maxCount <= 0)
+    {
+        XSRETURN_UNDEF;
+    }
+
+    hSemaphore = CreateSemaphore(
+                    NULL,           // no security attributes
+                    initCount,      // initial count
+                    maxCount,       // maximum count
+                    szNameSpace);   // unnamed semaphore
+
+    if (hSemaphore == NULL) {
+        XSRETURN_UNDEF;
+    }
+
+    RETVAL = (long) hSemaphore;
+}
+OUTPUT:
+    RETVAL
+
+
+IV WaitForSingleObject(IV hSemaphore, IV timeout)
+PREINIT:
+    dMY_CXT;
+    HANDLE h;
+    long t;
+    long result;
+CODE:
+{
+	if (!hSemaphore) {
+        XSRETURN_UNDEF; // undef = error
+    }
+    h = (HANDLE) hSemaphore;
+    if (timeout < 0) timeout = 0;
+    t = timeout;
+
+    result = (WaitForSingleObject(h, t) == WAIT_OBJECT_0) ? 1 : 0;
+
+    RETVAL = (long)result;
+}
+OUTPUT:
+    RETVAL
+
+
+IV ReleaseSemaphore(IV hSemaphore, IV increment)
+PREINIT:
+    dMY_CXT;
+CODE:
+{
+    if (!hSemaphore || (increment <= 0) )
+    {
+        XSRETURN_UNDEF;      // undef = error
+    }
+
+    if (!ReleaseSemaphore(
+        (HANDLE)hSemaphore,  // handle to semaphore
+        increment,           // increase count by increment
+        NULL) )              // not interested in previous count
+    {
+        RETVAL = (IV)0;
+    } else {
+        RETVAL = (IV)1;
+    }
 }
 OUTPUT:
     RETVAL

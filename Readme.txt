@@ -1,11 +1,11 @@
 #######################################################################
 #
 # Win32::MMF - Win32 Memory Mapped File Support for Perl
-# Version: 0.01 (06 Feb 2004)
+# Version: 0.03 (06 Feb 2004)
 # 
 # Author: Roger Lee <roger@cpan.org>
 #
-# $Id: Readme.txt,v 1.1 2004/02/05 15:04:16 Roger Lee Exp $
+# $Id: Readme.txt,v 1.2 2004/02/06 15:44:19 Roger Lee Exp $
 #
 #######################################################################
 
@@ -16,38 +16,20 @@ The current version of Win32::MMF is available on CPAN at:
 
   http://search.cpan.org/search?query=Win32::MMF
 
-The following is a list of the functions implemented in this module:
+The following is a quick overview of the look and feel of the module:
 
-  $debugmode = GetDebugMode();		# 0 - off, 1 - on
-  SetDebugMode($debugmode);
+  use Win32::MMF;
+  
+  # --- in process 1 ---
+  my $ns1 = Win32::MMF->new( -namespace => "MyData1" );
 
-  $fh = CreateFile($filename);		# Create new swap file
-  $fh = OpenFile($filename);		# Open existing swap file
-  CloseHandle($fh);				    # Close openned swap file handle
+  $ns1->write($data);   # autolock by default
 
-  $ns = CreateFileMapping($filehandle, $filesize, $namespace);
-  $ns = OpenFileMapping($namespace);	# Use existing namespace
-  CloseHandle($ns);				        # Close openned namespace
+  # --- in process 2 ---
+  my $ns2 = Win32::MMF->new( -namespace => "MyData1", -nocreate => 1 )
+          or die "namespace not exist";
 
-  $var = MapViewOfFile($ns, $offset, $size)	# Create a view inside the namespace
-  UnmapViewOfFile($var);			        # Delete the view
-
-  Poke($var, $str, length($str));		# Store a string into view
-  $str = Peek($var);			        # Retrieve a string from the view
-
-  PokeIV($var, $i);				        # Store a number(long) into view
-  $i = PeekIV($var);			        # Retrieve a number from the view
-
-  # High-level Namespace Functions
-
-  # claim a swapfile to use as namespace (default size is 64k)
-  # if $swapfile is undef, will use system page file instead
-
-  ($swp, $ns) = ClaimNamespace($swapfile, $namespace [, $size]);
-
-  ReleaseNamespace($swp, $namespace);
-
-  $ns = UseNamespace($namespace);  # use existing namespace
+  $data = $ns2->read(); # autolock by default
 
 
 Full documentation is available in POD format inside MMF.pm.
