@@ -2,6 +2,11 @@
 # CHANGES
 # $Id: Changes.txt,v 1.9 2004/02/27 15:52:32 Roger Lee Exp $
 # ===========================================================================
+0.09e
+    [INTERNALS]
+    - Fixed a problem with tied namespace not using provided parameters.
+    - Fixed a broken test case.
+
 0.09d
     [INTERNALS]
     - Fixed a broken test case.

@@ -366,6 +366,11 @@ sub _tie {
 
     croak "The label/key for the tied variable must be defined!" if !$self->{_key};
 
+    # retrieve the namespace parameters
+    $default_settings->{_namespace} = $self->{_namespace};
+    $default_settings->{_size} = $self->{_size};
+    $default_settings->{_swapfile} = $self->{_swapfile};
+
     init_with_default_settings() if ! $ns;
 
     bless $self, $class;

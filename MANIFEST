@@ -25,7 +25,6 @@ t/02_tie.t
 t/03_multiproc.t
 t/04_private_swap.t
 t/05_shared_hash.t
-t/06_shared_array.t
 Makefile.PL
 MANIFEST			This list of files
 META.yml
