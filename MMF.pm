@@ -5,6 +5,7 @@ use strict;
 use warnings;
 use Carp;
 use Storable 0.6 qw( freeze thaw );
+use Win32::Semaphore;
 
 require Exporter;
 require DynaLoader;
@@ -17,12 +18,11 @@ our @EXPORT_OK = qw/
         CreateFileMapping OpenFileMapping
         MapViewOfFile UnmapViewOfFile
         ClaimNamespace ReleaseNamespace UseNamespace
-        CreateSemaphore WaitForSingleObject ReleaseSemaphore
         InitMMF CreateVar FindVar SetVar GetVar GetVarType DeleteVar
         Malloc Free DumpHeap
     /;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
 
 croak "This module can only be used under Windows!" if $^O ne "MSWin32";
@@ -53,7 +53,7 @@ sub ClaimNamespace {
 
         # create a 1000-byte long shared memory namespace
         $ns = CreateFileMapping($swap, $size, $namespace);
-        $INITFLAG = 1;   # tell the constructor to initialize MMF
+        $INITFLAG++;   # tell the constructor to initialize MMF
     }
 
     return ($swap, $ns);
@@ -64,7 +64,7 @@ sub ClaimNamespace {
 sub ReleaseNamespace {
     my ($swp, $ns) = @_;
     CloseHandle($ns) if $ns;
-    CloseHandle($swp) if $swp;
+    # CloseHandle($swp) if $swp;
 }
 
 
@@ -149,7 +149,7 @@ sub new
     InitMMF($self->{_view}, $self->{_size}) if $INITFLAG;
 
     # create semaphore object for the view
-    $self->{_semaphore} = CreateSemaphore(1, 1, $self->{_namespace} . '.lock')
+    $self->{_semaphore} = Win32::Semaphore->new(1,1,$self->{_namespace} . '.lock')
         or croak("Can not create semaphore!");
 
     bless $self, $class;
@@ -158,9 +158,8 @@ sub new
 
 sub DESTROY {
     my $self = shift;
-
-    # release existing lock if any
-    CloseHandle($self->{_semaphore}) if $self->{_semaphore};
+    
+    $INITFLAG--;
 
     # unmap existing views
     for my $view_id (keys %{$self->{_views}}) {
@@ -176,14 +175,14 @@ sub lock
 {
     my ($self, $timeout) = @_;
     $timeout = $self->{_timeout} if !$timeout;
-    return WaitForSingleObject($self->{_semaphore}, $timeout);
+    $self->{_semaphore}->wait($timeout);
 }
 
 
 sub unlock
 {
     my $self = shift;
-    return ReleaseSemaphore($self->{_semaphore}, 1);
+    $self->{_semaphore}->release();
 }
 
 
@@ -330,7 +329,7 @@ for shared memory support under Windows. The core of the module
 is written in XS and is currently supported only under Windows
 NT/2000/XP.
 
-The current version 0.06 of Win32::MMF is available on CPAN at:
+The current version 0.09 of Win32::MMF is available on CPAN at:
 
   http://search.cpan.org/search?query=Win32::MMF
 

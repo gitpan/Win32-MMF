@@ -1,7 +1,18 @@
 # ===========================================================================
 # CHANGES
-# $Id: Changes.txt,v 1.6 2004/02/16 14:35:32 Roger Lee Exp $
+# $Id: Changes.txt,v 1.7 2004/02/18 20:55:15 Roger Lee Exp $
 # ===========================================================================
+
+0.09
+    [INTERNALS]
+    - Fixed a problem with ReleaseNamespace that caused Perl to crash randomly
+      when destroying an MMF object
+    - Switched to Win32::Semaphore for locking, fixed problem with locking
+    - Special thanks to extensive Beta testing done by [xiper] at Perl Monks.
+
+    [ENHANCEMENTS]
+    - Added more demo and test cases.
+    - Created separate POD for Win32::MMF::Shareable.
 
 0.08
     [INTERNALS]

@@ -10,12 +10,12 @@ require Exporter;
 require DynaLoader;
 
 our @ISA = qw/ Exporter /;
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 # ------------------- Tied Interface -------------------
 
-my $ns;
-my $locking_level = 0;
+our $ns;
+our $locking_level = 0;
 
 sub import {
     my $class = shift;
@@ -49,25 +49,21 @@ sub namespace {
 }
 
 sub lock {
-    return if !$ns;
-    $ns->lock() if $locking_level;
+    $ns->lock() if !$locking_level;
     $locking_level++;
 }
 
 sub unlock {
-    return if !$ns;
     $locking_level--;
     $ns->unlock() if !$locking_level;
 }
 
 sub shlock {
-    return if !$ns;
-    $ns->lock() if $locking_level;
+    $ns->lock() if !$locking_level;
     $locking_level++;
 }
 
 sub shunlock {
-    return if !$ns;
     $locking_level--;
     $ns->unlock() if !$locking_level;
 }
@@ -153,7 +149,6 @@ TYPE: {
         if ($self->{_type} eq 'S') {
             if (defined $self->{_data}) {
                 $val = $self->{_data};
-                # print "FETCH: $val\n";
                 last TYPE;
             } else {
                 $self->unlock();
@@ -382,12 +377,191 @@ sub _tie {
 
     init_with_default_settings() if ! $ns;
 
-    $ns->lock();
-    $ns->setvar($self->{_key}, '') if !$ns->findvar($self->{_key});
-    $ns->unlock();
+    #$ns->lock();
+    #$ns->setvar($self->{_key}, '') if !$ns->findvar($self->{_key});
+    #$ns->unlock();
 
     bless $self, $class;
 }
 
 1;
+
+=pod
+
+=head1 NAME
+
+ Win32::MMF::Shareable - tied variable interface to MMF
+
+=head1 SYNOPSIS
+
+  use Win32::MMF::Shareable;
+
+  my $ns = tie my $s1, "Win32::MMF::Shareable", "varid";
+  tie my @a1, "Win32::MMF::Shareable", "array";
+  $s1 = 'Hello world';
+  @a1 = ( A => 1, B => 2, C => 3 );
+
+  tie my $s2, "Win32::MMF::Shareable", "varid";
+  tie my @a1, "Win32::MMF::Shareable", "array";
+  print "$s2\n";
+  print "@a1\n";
+
+
+=head1 ABSTRACT
+
+This module provides a tied variable interface to the
+Win32::MMF module. It is part of the Win32::MMF package.
+
+The current version 0.09 of Win32::MMF is available on CPAN at:
+
+  http://search.cpan.org/search?query=Win32::MMF
+
+
+=head1 DESCRIPTION
+
+The Win32::MMF::Shareable module is modelled after C<IPC::Shareable>.
+All options from C<IPC::Shareable> can be used in Win32::MMF::Shareable,
+although they are mostly ignored except for the 'label' argument.
+Because memory and variable management are managed internally by the
+Win32::MMF module, you do not need to specify how much memory is
+required by the variable.
+
+All access to tied variables are automatically and exclusively locked
+to preserve data integrity across multiple processes.
+
+Win32::MMF::Shareable mimics the operation of C<IPC::Shareable>,
+it allows you to tie a variable to a namespace (shared memory)
+making it easy to share its content with other Perl processes.
+
+Note that if you try to tie a variable without specifying the
+namespace, the default namespace 'shareable' will be used. If you
+want to change how the default namespace is created, provide the
+namespace, swapfile and size options when you tie the first variable.
+
+ use Win32::MMF::Shareable;
+ tie $scalar, "Win32::MMF::Shareable", "var_1",
+              { namespace = 'MyNamespace', size = 1024 * 1024,
+                swapfile = 'C:\private.swp' };
+
+The options are exactly the same as the Win32::MMF constructor options.
+For compatibility with IPC::Shareable, you can pass in IPC::Shareable
+options, although they mostly get ignored, except for the 'key' option.
+
+An alternative is to provide these options when the Win32::MMF::Shareable
+module is imported:
+
+ use Win32::MMF::Shareable { namespace = 'MyNamespace',
+                             size = 1024 * 1024,
+                             swapfile = 'C:\private.swp' };
+ tie $scalar,"Win32::MMF::Shareable", "var_1";
+
+Currently only scalars, arrays, and hashes can be tied, I am investigating
+on the possibilities with tied file handles at the moment.
+
+To tie a variable to the default namespace:
+
+ tie $scalar, "Win32::MMF::Shareable", "var_1";
+ tie @array,  "Win32::MMF::Shareable", "var_2";
+ tie %hash,   "Win32::MMF::Shareable", "var_3";
+
+And to use a tied variable:
+
+ $scalar = 'Hello Perl';
+
+ @array = qw/ A B C D E F G /;
+
+ %hash = @array;
+
+
+=head1 REFERENCE
+
+=head2 Initialization
+
+There are two ways to initialize an MMF namespace to be
+used in tied mode.
+
+ # Method 1 - when importing the module
+ use Win32::MMF::Shareable { namespace = 'MyNamespace',
+                             size = 1024 * 1024,
+                             swapfile = 'C:\private.swp' };
+
+ # Method 2 - initialization upon first use
+ use Win32::MMF::Shareable;
+ tie $scalar, "Win32::MMF::Shareable", "var_1",
+              { namespace = 'MyNamespace', size = 1024 * 1024,
+                swapfile = 'C:\private.swp' };
+
+The options are exactly the same as those for the Win32::MMF
+constructor, although you can pass in IPC::Shareable options
+as well, making it easy to port IPC::Shareable
+
+=head2 Locking
+
+All read and write accesses to a tied variable are locked
+by default. Additional level of locking can be performed to
+protect critical part of the code.
+
+ my $ns = tie $scalar, "Win32::MMF::Shareable", "var_1";
+ ...
+
+ $ns->lock();
+ $scalar = 'some string';
+ $ns->unlock();
+
+=head2 Debugging
+
+There is a built-in method B<debug> that will display as
+much information as possible for a given tied object.
+
+ my $ns = tie $scalar, "Win32::MMF::Shareable", "var_1";
+ ...
+
+ $ns->debug();
+
+=head2 Limitations
+
+Currently only scalar, list and hash can be tied and modified
+correctly. You can tie a scalar reference too, but the
+elements that the scalar reference is pointing to can not
+be modified by a direct assignment. The way to get around
+it is to make a local copy of the tied reference, modify the
+local copy, and then assign the modified local copy back to
+the reference.
+
+ tie $ref, "Win32::MMF::Shareable", "var_1";
+ $ref = [ 'A', 'B', 'C' ];
+
+ push @$ref, 'D';       # this does not work
+
+ @list = @$ref;
+ push @list, 'D';
+ $ref = \@list;         # this works
+
+
+=head1 SEE ALSO
+
+C<Win32::MMF>
+
+=head1 CREDITS
+
+Credits go to my wife Jenny and son Albert, and I love them forever.
+
+=back
+
+
+=head1 AUTHOR
+
+Roger Lee <roger@cpan.org>
+
+=back
+
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2004 Roger Lee
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
 

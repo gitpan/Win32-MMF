@@ -10,31 +10,31 @@ my $i = 0;
 
 if( fork )
 {
-  my %share;
-  my $ns = tie( %share, 'Win32::MMF::Shareable', 'share' ) || die;
+  my @share;
+  my $ns = tie( @share, 'Win32::MMF::Shareable', 'share' ) || die;
   print $ns->namespace()->{_view}, "\n";
 
   select( undef, undef, undef, $delay / 2 );
   while( $i < 20 )
   {
-    $share{ 'P' . $i++ } = '-';
+    $share[$i++] = '-';
     $ns->lock();
-    print "parent($i): " . join( '', values( %share ) ) . "\n";
+    print "parent($i): " . join( '', @share ) . "\n";
     $ns->unlock();
     select( undef, undef, undef, $delay );
   }
 }
 else
 {
-  my %share;
-  my $ns = tie( %share, 'Win32::MMF::Shareable', 'share' ) || die;
+  my @share;
+  my $ns = tie( @share, 'Win32::MMF::Shareable', 'share' ) || die;
   print $ns->namespace()->{_view}, "\n";
 
   while( $i < 20 )
   {
-  	$share{ 'P' . $i++ } = '#';
-    $ns->lock();
-    print "child($i) : " . join( '', values( %share ) ) . "\n";
+  	$share[$i++] = '#';
+  	$ns->lock();
+    print "child($i) : " . join( '', @share ) . "\n";
     $ns->unlock();
     select( undef, undef, undef, $delay );
   }
