@@ -10,12 +10,19 @@ require Exporter;
 require DynaLoader;
 
 our @ISA = qw/ Exporter /;
-our @EXPORT_OK = qw/ Debug Namespace /;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 # ------------------- Tied Interface -------------------
 
 our $ns;
+
+sub import {
+    my $class = shift;
+    if (@_ && !$ns) {
+        $ns = Win32::MMF->new(@_) or croak "No shared mem!";
+        $ns->{_autolock} = 0;
+    }
+}
 
 my $default_settings = {
     _key => undef,      # only the key is used
@@ -26,7 +33,7 @@ my $default_settings = {
     _iterating => '',
 };
 
-sub init {
+sub init_with_default_settings {
     if (!$ns) {
         $ns = Win32::MMF->new ( -namespace => $default_settings->{_namespace},
                                 -size => $default_settings->{_size},
@@ -36,8 +43,8 @@ sub init {
     }
 }
 
-sub ns {
-    return $ns
+sub namespace {
+    return $ns;
 }
 
 sub debug {
@@ -45,24 +52,24 @@ sub debug {
 }
 
 sub TIESCALAR {
-    return _tie(SCALAR => @_);
+    return _tie(S => @_);
 }
 
 sub TIEARRAY {
-    return _tie(ARRAY => @_);
+    return _tie(A => @_);
 }
 
 sub TIEHASH {
-    return _tie(HASH => @_);
+    return _tie(H => @_);
 }
 
 sub CLEAR {
     my $self = shift;
     $ns->lock();
     $ns->setvar($self->{_key}, '');
-    if ($self->{_type} eq 'ARRAY') {
+    if ($self->{_type} eq 'A') {
         $self->{_data} = [];
-    } elsif ($self->{_type} eq 'HASH') {
+    } elsif ($self->{_type} eq 'H') {
         $self->{_data} = {};
     } else {
         croak "Attempt to clear non-aggegrate";
@@ -75,20 +82,20 @@ sub EXTEND { }
 sub STORE {
     my $self = shift;
     $ns->lock();
-    $self->{_data} = $ns->getvar($self->{_key});
+    # $self->{_data} = $ns->getvar($self->{_key});
 
 TYPE: {
-        if ($self->{_type} eq 'SCALAR') {
+        if ($self->{_type} eq 'S') {
             $self->{_data} = shift;
             last TYPE;
         }
-        if ($self->{_type} eq 'ARRAY') {
+        if ($self->{_type} eq 'A') {
             my $i   = shift;
             my $val = shift;
             $self->{_data}->[$i] = $val;
             last TYPE;
         }
-        if ($self->{_type} eq 'HASH') {
+        if ($self->{_type} eq 'H') {
             my $key = shift;
             my $val = shift;
             $self->{_data}->{$key} = $val;
@@ -118,7 +125,7 @@ sub FETCH {
 
     my $val;
 TYPE: {
-        if ($self->{_type} eq 'SCALAR') {
+        if ($self->{_type} eq 'S') {
             if (defined $self->{_data}) {
                 $val = $self->{_data};
                 last TYPE;
@@ -127,7 +134,7 @@ TYPE: {
                 return;
             }
         }
-        if ($self->{_type} eq 'ARRAY') {
+        if ($self->{_type} eq 'A') {
             if (defined $self->{_data}) {
                 my $i = shift;
                 $val = $self->{_data}->[$i];
@@ -137,7 +144,7 @@ TYPE: {
                 return;
             }
         }
-        if ($self->{_type} eq 'HASH') {
+        if ($self->{_type} eq 'H') {
             if (defined $self->{_data}) {
                 my $key = shift;
                 $val = $self->{_data}->{$key};
@@ -148,10 +155,6 @@ TYPE: {
             }
         }
         croak "Variables of type $self->{_type} not supported";
-    }
-
-    if (my $inner = _is_kid($val)) {
-        $inner->{_data} = $ns->getvar($inner->{_key});
     }
 
     $ns->unlock();
@@ -351,9 +354,7 @@ sub _tie {
 
     croak "The label/key for the tied variable must be defined!" if !$self->{_key};
 
-    init( -namespace => $self->{_namespace},
-          -swapfile => $self->{_swapfile},
-          -size => $self->{_size} ) if ! $ns;
+    init_with_default_settings() if ! $ns;
 
     $ns->lock();
     $ns->setvar($self->{_key}, '') if !$ns->findvar($self->{_key});
@@ -361,29 +362,6 @@ sub _tie {
 
     bless $self, $class;
 }
-
-
-sub _is_kid {
-    my $data = shift;
-    $data or return;
-    my $type = "$data";
-
-    my $obj;
-    if ($type eq "HASH") {
-        $obj = tied %$data;
-    } elsif ($type eq "ARRAY") {
-        $obj = tied @$data;
-    } elsif ($type eq "SCALAR") {
-        $obj = tied $$data;
-    }
-
-    if (ref $obj eq 'Win32::MMF::Shareable') {
-        return $obj;
-    } else {
-        return;
-    }
-}
-
 
 1;
 

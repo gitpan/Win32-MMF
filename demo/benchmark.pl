@@ -1,6 +1,5 @@
 use strict;
 use Benchmark qw/ timethese cmpthese /;
-use File::Cache;
 use Win32::MMF;
 use Win32::MMF::Shareable;
 
@@ -15,16 +14,10 @@ tie my $shvar1, "Win32::MMF::Shareable", 'Var1';
 tie my $shvar2, "Win32::MMF::Shareable", 'Var2';
 tie my $shvar3, "Win32::MMF::Shareable", 'Var3';
 
-# initialization - File::Cache
-my $cache = new File::Cache( { namespace  => 'MyCache',
-                               expires_in => 86400,
-                               filemode => 0600 } );
-
 # -------------------------------------------------------------
 
 # test data set
 my $var1 = "Hello world!";
-
 my $dirvar1;
 
 
@@ -47,21 +40,11 @@ sub STORE_direct
     $dirvar1 = $var1;
 }
 
-sub STORE_cacheset
-{
-    $cache->set('Var1', $var1);
-}
-
-#STORE_setvar();
-#STORE_tiedvar();
-#$ns->debug();
-
 cmpthese( timethese (
-     1000000,
+     500000,
      {
         'setvar' => '&STORE_setvar',
         'tiedvar' => '&STORE_tiedvar',
         'direct' => '&STORE_direct',
-        # 'cacheset' => '&STORE_cacheset',
      } ) );
 

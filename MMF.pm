@@ -22,7 +22,7 @@ our @EXPORT_OK = qw/
         Malloc Free DumpHeap
     /;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
 
 croak "This module can only be used under Windows!" if $^O ne "MSWin32";
@@ -668,6 +668,14 @@ namespace, swapfile and size options when you tie the first variable.
 The options are exactly the same as the Win32::MMF constructor options.
 For compatibility with IPC::Shareable, you can pass in IPC::Shareable
 options, although they mostly get ignored, except for the 'key' option.
+
+An alternative is to provide these options when the Win32::MMF::Shareable
+module is imported:
+
+ use Win32::MMF::Shareable { namespace = 'MyNamespace',
+                             size = 1024 * 1024,
+                             swapfile = 'C:\private.swp' };
+ tie $scalar,"Win32::MMF::Shareable", "var_1";
 
 Currently only scalars, arrays, and hashes can be tied, I am investigating
 on the possibilities with tied file handles at the moment.

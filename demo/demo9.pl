@@ -1,6 +1,7 @@
 use strict;
 use Data::Dumper;
-use Win32::MMF::Shareable;
+use Win32::MMF::Shareable {namespace => 'MyNamespace',
+                           size => 1024 * 1024};
 
 my $ns = tie my $ref, 'Win32::MMF::Shareable', '$ref';
 tie my $alias, 'Win32::MMF::Shareable', '$ref';
