@@ -23,13 +23,13 @@ The following is a quick overview of the look and feel of the module:
   # --- in process 1 ---
   my $ns1 = Win32::MMF->new( -namespace => "MyData1" );
 
-  $ns1->write($data);   # autolock by default
+  $ns1->setvar('varid', $data);
 
   # --- in process 2 ---
   my $ns2 = Win32::MMF->new( -namespace => "MyData1", -reuse => 1 )
           or die "namespace not exist";
 
-  $data = $ns2->read(); # autolock by default
+  $data = $ns2->getvar('varid');
 
 
 Full documentation is available in POD format inside MMF.pm.

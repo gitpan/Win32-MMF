@@ -16,12 +16,14 @@ our @EXPORT_OK = qw/
         CreateFile OpenFile CloseHandle
         CreateFileMapping OpenFileMapping
         MapViewOfFile UnmapViewOfFile
-        Peek Poke PeekIV PokeIV
         ClaimNamespace ReleaseNamespace UseNamespace
         CreateSemaphore WaitForSingleObject ReleaseSemaphore
+        InitMMF CreateVar FindVar SetVar GetVar GetVarType DeleteVar
+        Malloc Free DumpHeap
     /;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
+our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
 our $TRANSPORTER = Data::Serializer->new (
                         serializer => 'Data::Dumper',
                         portable   => '1',
@@ -34,14 +36,14 @@ our $TRANSPORTER = Data::Serializer->new (
 bootstrap Win32::MMF $VERSION;
 
 
-# High-level Name Space Wrapper Functions
+# --------------- High-level Name Space Wrapper Functions ---------------
 
 
 # Sytax: ($swp, $ns) = UseNamespace($swapfile, $namespace);
 sub ClaimNamespace {
     my ($swapfile, $namespace, $size) = @_;
-    $size = 64 * 1024 if !$size;    # namespace 64K by default
-
+    $size = 128 * 1024 if !$size;    # namespace 128K by default
+    
     # attempt to use existing namespace
     my $ns = OpenFileMapping($namespace);
 
@@ -57,6 +59,7 @@ sub ClaimNamespace {
 
         # create a 1000-byte long shared memory namespace
         $ns = CreateFileMapping($swap, $size, $namespace);
+        $INITFLAG = 1;   # tell the constructor to initialize MMF
     }
 
     return ($swap, $ns);
@@ -91,7 +94,7 @@ sub new
 
     my $self = {
         _namespace => undef,
-        _size      => 64 * 1024,   # 64k namespace by default
+        _size      => 128 * 1024,  # 128k namespace by default
         _swapfile  => undef,       # use windows virtual memory
         _reuse     => 0,           # reuse existing namespace only
         _autolock  => 1,           # I/O locking by default
@@ -100,11 +103,12 @@ sub new
         _view      => 0,           # view handle
         _timeout   => 10,          # default timeout value
         _semaphore => 0,           # semaphore used for locking
+        _debug     => 0,           # debug mode indicator
     };
 
     croak "Namespace must be defined!" if !defined $_[1];
-    
-    my $allowed_parameters = "namespace|size|swapfile|reuse|autolock|timeout";
+
+    my $allowed_parameters = "namespace|size|swapfile|reuse|autolock|timeout|debug";
 
     if (ref $_[1] eq 'HASH') {
         # Parameters passed in as HASHREF
@@ -129,6 +133,10 @@ sub new
 
     croak "Namespace must be defined!" if !$self->{_namespace};
 
+    # turn on/off debug mode
+    $self->{_debug} = 1 if $self->{_debug};
+    SetDebugMode($self->{_debug});
+
     # use or open or create namespace
     if ($self->{_reuse}) {
         $self->{_ns} = UseNamespace($self->{_namespace}) or return undef;
@@ -139,6 +147,7 @@ sub new
 
     # set default view to the namespace
     $self->{_view} = MapViewOfFile($self->{_ns}, 0, $self->{_size});
+    InitMMF($self->{_view}, $self->{_size}) if $INITFLAG;
 
     # create semaphore object for the view
     $self->{_semaphore} = CreateSemaphore(1, 1, $self->{_namespace} . '.lock')
@@ -168,7 +177,6 @@ sub lock
 {
     my ($self, $timeout) = @_;
     $timeout = $self->{_timeout} if !$timeout;
-
     return WaitForSingleObject($self->{_semaphore}, $timeout);
 }
 
@@ -180,49 +188,102 @@ sub unlock
 }
 
 
-sub read
+sub findvar
 {
-    my $self = shift;
+    my ($self, $varname) = @_;
+    return !(!(FindVar($self->{_view}, $varname)));
+}
+
+
+sub getvar
+{
+    my ($self, $varname) = @_;
     my $str;
+    my $type;
+
+    return undef if !$varname;
 
     if ($self->{_autolock}) {
-        $self->lock($self->{_timeout});
-        $str = Peek($self->{_view});
+        return undef if !$self->lock($self->{_timeout});
+        $type = GetVarType($self->{_view}, $varname);
+        $self->unlock(), return undef if !defined $type;
+        $str = GetVar($self->{_view}, $varname);
         $self->unlock();
     } else {
-        $str = Peek($self->{_view});
+        $type = GetVarType($self->{_view}, $varname);
+        return undef if !defined $type;
+
+        $str = GetVar($self->{_view}, $varname);
     }
 
-    return $TRANSPORTER->deserialize($str);
+    if (defined $str && $type) {
+           $str = $TRANSPORTER->deserialize($str);
+    }
+
+    return $str;
 }
 
 
-sub write
+sub setvar
 {
     my $self = shift;
-    my $str = $TRANSPORTER->serialize(@_);
+    my $varname = shift;
+    return 0 if !$varname;
+
+    my $str;        # simple string or serialized object string
+    my $type = 0;   # type of the string, 0 = simple, 1 = serialized
+
+    if (@_ == 1) {
+        $str = shift;
+        if (ref $str) {
+            # serialize if a complex structure
+            $str = $TRANSPORTER->serialize($str);
+            $type = 1;
+        }
+        # simple string by default
+    } else {
+        # always serialize if more than 1 data members
+        $str = $TRANSPORTER->serialize(@_);
+        $type = 1;
+    }
 
     if ($self->{_autolock}) {
-        $self->lock($self->{_timeout});
-        Poke($self->{_view}, $str, length($str));
+        return 0 if !$self->lock($self->{_timeout});
+        if (defined $str) {
+            SetVar($self->{_view}, $varname, $type, $str, length($str));
+        } else {
+            DeleteVar($self->{_view}, $varname);
+        }
         $self->unlock();
     } else {
-        Poke($self->{_view}, $str, length($str));
+        SetVar($self->{_view}, $varname, $type, $str, length($str));
     }
+    return 1;
 }
 
 
-sub read_iv
+sub deletevar
 {
     my $self = shift;
-    return PeekIV($self->{_view});
+    my $varname = shift;
+    return 0 if !$varname;
+    my $result;
+
+    if ($self->{_autolock}) {
+        return 0 if !$self->lock($self->{_timeout});
+        $result = DeleteVar($self->{_view}, $varname);
+        $self->unlock();
+    } else {
+        $result = DeleteVar($self->{_view}, $varname);
+    }
+    return $result;
 }
 
 
-sub write_iv
+sub debug
 {
-    my ($self, $value) = @_;
-    PokeIV($self->{_view}, $value);
+    my $self = shift;
+    DumpHeap($self->{_view});
 }
 
 
@@ -239,16 +300,16 @@ sub write_iv
  use Win32::MMF;
 
  # --- in process 1 ---
- my $ns1 = Win32::MMF->new ( -namespace => "My.Var1" );
+ my $ns = Win32::MMF->new( -namespace => "MySharedMem" );
 
- $ns1->write($data);
+ $ns->setvar('varid', $data);
 
  # --- in process 2 ---
- my $ns2 = Win32::MMF->new ( -namespace => "My.Var1",
-                             -reuse     => 1 )
-         or die "namespace not exist";
+ my $ns = Win32::MMF->new( -namespace => "MySharedMem" );
 
- $data = $ns2->read();
+ $data = $ns->getvar('varid');
+
+ $ns->deletevar('varid');
 
 
 =head1 ABSTRACT
@@ -282,9 +343,11 @@ creating a memory mapping and finally creating a view:
    use Win32::MMF qw/ ClaimNamespace UseNamespace MapViewOfFile /;
 
    my ($swap, $ns, $view) = (0, 0, 0);
-   $ns = UseNamespace("MyData1");
+   $ns = UseNamespace("MyDataShare");
    if (!ns) {
-       ($swap, $ns) = ClaimNamespace("data.swp", "MyData1", 1000);
+       ($swap, $ns) = ClaimNamespace("data.swp",
+                                     "MyDataShare",
+                                     2 * 1024 * 1024);
        die "Can not create swap file" if !$swap;
        die "Can not create namespace" if !$ns;
    }
@@ -301,10 +364,10 @@ result in object-oriented style:
 
    use Win32::MMF;
 
-   my $ns = Win32::MMF->new( -swapfile=>"data.swp",
-                             -namespace=>"MyData1",
-                             -size=>1000 )
-       or die "Can not create shared namespace";
+   my $ns = Win32::MMF->new( -swapfile => "data.swp",
+                             -namespace => "MyDataShare",
+                             -size => 2 * 1024 * 1024 )
+       or die "Can not create namespace";
 
 Note that there is no need to explicitly unmap the view, close the
 namespace and close the swap file in object-oriented mode, the view,
@@ -345,7 +408,7 @@ In Win32::MMF a namespace represents shared memory identified by a
 unique name. The namespace must be unique system wide. A suggested
 convention to follow is <[APPID].[VARID]>.
 
-Example: 'MyApp.SharedMem1'.
+Example: 'MyApp.SharedMemory'.
 
 
 =head2 Creating a Namespace Object
@@ -400,15 +463,14 @@ parameters are optional.
 =item -swapfile
 
 Specify the name of the memory mapped file (swap file).
-if it is omitted or undef then the system swap file will
+if it is omitted or undef then the system pagefile will
 be used.
 
 =item -namespace
 
-A string that uniquely identifies a block of shared memory.
-The namespace must be unique system wide. A suggested
-convention to follow is <[APPID].[VARID]>. This option is
-mandatory.
+A label that uniquely identifies the shared memory. The
+namespace must be unique system wide. A suggested convention
+to follow is <[APPID].[VARID]>. This option is mandatory.
 
 =item -size
 
@@ -431,12 +493,16 @@ Specify the number of seconds to wait before timing out
 the lock. This value is set to 10 seconds by default. Set
 timeout to 0 to wait forever.
 
-=back
+=item -debug
+
+Turn on/off the internal MMF debugger.
 
 =back
 
+=back
 
-=head2 Lock a Namespace Object (for Read/Write Access)
+
+=head2 Locking a Namespace
 
 All read and write accesses to a namespace are locked
 by default. However if auto-locking is turned off, a
@@ -475,96 +541,165 @@ $ns->unlock();
 All read and write accesses to a namespace are locked
 by default to preserve data integrity across processes.
 The excellent L<Data::Serializer> module is used for
-data serialization.
+data serialization for complex structures.
+
+=head2 Variables inside a Namespace
+
+Each data element written to a namespace is identified
+by a unique label (variable name). Variable definitions
+are held inside the namespace itself to be shared among
+multiple processes. The B<debug> method can be used to
+display current variable definitions within the namespace.
+
+Note that variables defined inside a namespace are
+considered global and will not be deleted unless the user
+explicitly calls the B<deletevar> method or setting the
+variable to undef.
+
 
 =over 4
 
-=item $ns->write($data, ...);
+=item $ns->setvar('VarId', $data, ...);
 
 Serialize all given data and then write the serialized
-data into namespace. Please refer to the L<Data::Serializer>
-documentation on how to serialize and retrieve data.
+data into the variable inside the namespace. The variable
+will be automatically created if it does not exist.
 
-A string is written into the shared memory in Pascal
-string format, ie., <length><string data>. Special care
-is taken to preserve the string during transportation
-so that the exact string including '\0' characters will
-be retrieved back from the shared memory.
+Because the variable definition table is held inside the
+shared memory itself, variables created in one process
+can be used by another process immediately.
 
-=item $ns->write_iv($i);
+Beware that setting a namespace variable to empty
+string will free up the shared memory currently held by the
+variable, but will not delete the variable from the namespace.
+Setting the variable to undef will not only free up the
+shared memory but also delete the variable from the namespace.
 
-Writes an integer value into the shared memory. This can
-be used to clear the length of a string (and thus clearing
-the shared memory).
+=item $data = $ns->getvar('VarId');
 
-=item $data = $ns->read();
-
-Retrieves the serialized data string from the shared memory,
+Retrieves the serialized data string from the namespace,
 and deserializes back into perl variable(s). Please refer to
 the L<Data::Serializer> documentation on how to serialize and
-retrieve data.
+retrieve data. Simple scalars are not serialized however to
+maximize the access efficiency.
 
-=item $i = $ns->read_iv();
+=item $ns->deletevar('VarId');
 
-Reads an integer value from the shared memory. This can
-be used to test the shared memory for availability of data,
-for example.
+Delete the given variable from the namespace and free up
+shared memory allocated to the variable. This is equivalent
+to setting a variable to undef.
+
+
+=back
+
+=head2 Debugging a Namespace
+
+There is a built-in method B<debug> that will display as
+much information as possible for a given namespace object.
+
+=over 4
+
+=item $ns->debug();
+
+Dump the Memory Mapped File Descriptor (MMFD), shared memory
+heap and variable definition table for the namespace.
 
 =back
 
 =back
 
 
-=head1 EXAMPLE
+=head1 EXAMPLE 1 - setvar, getvar and deletevar
 
  use strict;
  use warnings;
  use Win32::MMF;
  use Data::Dumper;
- use CGI;   # for testing of inter-process object transportation
+
+ my $ns = new Win32::MMF( -namespace => "MyNamespace" ) or die;
+
+ # setting variables and getting them back
+ my $var1 = "Hello world!";
+ my $var2 = {
+    'Name' => 'Roger',
+    'Module' => 'Win32::MMF',
+ };
+
+ $ns->setvar('Hello', $var1);
+ $ns->setvar('Hash', $var2);
+ $ns->debug();
+
+ my $r1 = $ns->getvar('Hello');
+ my $r2 = $ns->getvar('Hash');
+ print Dumper($r1), Dumper($r2), "\n";
+
+ $ns->deletevar('Hello');
+ $ns->setvar('Hash', undef);
+ $ns->debug();
+
+
+=head1 EXAMPLE 2 - inter-process signalling
+
+ use strict;
+ use warnings;
+ use Win32::MMF;
+ use Data::Dumper;
+ use CGI;
 
  # fork a process
  defined(my $pid = fork()) or die "Can not fork a child process!";
 
  if ($pid) {
-     my $ns1 = Win32::MMF->new ( -namespace => "My.data1" );
-     my $ns2 = Win32::MMF->new ( -namespace => "My.data2" );
+    my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
+                                -size => 1024 * 1024 );
 
-     my $cgi = new CGI;
-     my $data = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
+    my $cgi = new CGI;
+    my $hash = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
+    my $str = "Hello World!";
 
-     $ns1->write($data);
-     $ns2->write($cgi);
+    $ns1->setvar("MyMMF.HASH", $hash);
+    $ns1->setvar("MyMMF.CGI", $cgi);
+    $ns1->setvar("MyMMF.STRING", $str);
 
-     print "--- Sent ---\n";
-     print Dumper($data), "\n";
-     print Dumper($cgi), "\n";
+    print "--- PROC1 - Sent ---\n";
+    print Dumper($hash), "\n";
+    print Dumper($cgi), "\n";
+    print Dumper($str), "\n";
 
-     sleep(1);
+    # signal proc 2
+    $ns1->setvar("MyMMF.SIG", '');
+
+    # wait for ACK variable to come alive
+    do {} while ! $ns1->findvar("MyMMF.ACK");
+    $ns1->deletevar("MyMMF.ACK");
+
+    # debug current MMF structure
+    $ns1->debug();
 
  } else {
-     sleep(1);  # child process wait for parent to initialize
 
-     my $ns1 = Win32::MMF->new ( -namespace => "My.data1",
-                                 -reuse => 1 )
-             or die "Namespace does not exist!";
+    my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
+                                -size => 1024 * 1024 );
 
-     my $ns2 = Win32::MMF->new ( -namespace => "My.data2",
-                                 -reuse => 1 )
-             or die "Namespace does not exist!";
+    do {} while !$ns1->findvar("MyMMF.SIG");
+    $ns1->deletevar("MyMMF.SIG");
 
-     my $data = $ns1->read();
-     my $cgi = $ns2->read();
+    my $hash = $ns1->getvar("MyMMF.HASH");
+    my $cgi = $ns1->getvar("MyMMF.CGI");
+    my $str = $ns1->getvar("MyMMF.STRING");
 
-     print "--- Received ---\n";
-     print Dumper($data), "\n";
-     print Dumper($cgi), "\n";
+    print "--- PROC2 - Received ---\n";
+    print Dumper($hash), "\n";
+    print Dumper($cgi), "\n";
 
-     print "--- Use Received Object ---\n";
-     # use the object from another process :-)
-     print $cgi->header(),
-           $cgi->start_html(), "\n",
-           $cgi->end_html(), "\n";
+    print "--- PROC2 - Use Received Object ---\n";
+    # use the object from another process :-)
+    print $cgi->header(),
+          $cgi->start_html(), "\n",
+          $cgi->end_html(), "\n\n";
+
+    # signal proc 1
+    $ns1->setvar("MyMMF.ACK", '');
  }
 
 
