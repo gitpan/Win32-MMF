@@ -252,7 +252,11 @@ sub setvar
         }
         $self->unlock();
     } else {
-        SetVar($self->{_view}, $varname, $type, $str, length($str));
+        if (defined $str) {
+            SetVar($self->{_view}, $varname, $type, $str, length($str));
+        } else {
+            DeleteVar($self->{_view}, $varname);
+        }
     }
     return 1;
 }

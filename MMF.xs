@@ -7,9 +7,13 @@
  *		Roger Lee
  *		Copyright (C) 2004. All Rights Reserved.
  *
- * $Id: MMF.xs,v 1.2 2004/02/06 15:45:58 Roger Lee Exp $
+ * $Id: MMF.xs,v 1.3 2004/02/10 10:19:37 Roger Lee Exp $
  * ---
  * $Log: MMF.xs,v $
+ * Revision 1.3  2004/02/10 10:19:37  Roger Lee
+ * Added object oriented interface, tie() interface. Memory management
+ * and variable management.
+ *
  * Revision 1.2  2004/02/06 15:45:58  Roger Lee
  * Removed mmf_* prefix from function names, added Windows semaphore support.
  *

@@ -1,0 +1,25 @@
+Changes.txt
+demo/demo1.pl
+demo/demo2.pl
+demo/demo3.pl
+demo/demo4.pl
+demo/demo5.pl
+demo/demo6.pl
+demo/demo6_p1.pl
+demo/demo6_p2.pl
+demo/demo7.pl
+demo/demo7_client.pl
+demo/demo7_server.pl
+Makefile
+Makefile.PL
+MANIFEST			This list of files
+META.yml
+MMF.bs
+MMF.c
+MMF.def
+MMF.h
+MMF.obj
+MMF.pm
+MMF.xs
+MMF/Shareable.pm
+Readme.txt
