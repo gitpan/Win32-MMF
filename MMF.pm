@@ -103,20 +103,22 @@ sub new
     };
 
     croak "Namespace must be defined!" if !defined $_[1];
+    
+    my $allowed_parameters = "namespace|size|swapfile|nocreate|autolock|timeout";
 
     if (ref $_[1] eq 'HASH') {
         # Parameters passed in as HASHREF
         for my $p (keys %{$_[1]}) {
-            croak "Unknown parameter '$p', must be [namespace|size|swapfile|nocreate|autolock|timeout]\n"
-                if $p !~ /^(?:namespace|size|swapfile|nocreate|autolock|timeout)$/i;
+            croak "Unknown parameter '$p', must be [$allowed_parameters]\n"
+                if $p !~ /^(?:$allowed_parameters)$/i;
             $self->{'_' . lc $p} = $_[1]->{$p};
         }
-    } elsif ($_[1] =~ /^-(?=namespace|size|swapfile|nocreate|autolock|timeout)/i) {
+    } elsif ($_[1] =~ /^-(?=$allowed_parameters)/i) {
         # Parameters passed in as named parameters
         my (undef, %p) = @_;
         for my $p (keys %p) {
-            croak "Unknown parameter '$p', must be [namespace|size|swapfile|nocreate|autolock|timeout]\n"
-                if $p !~ /^-(?:namespace|size|swapfile|nocreate|autolock|timeout)$/i;
+            croak "Unknown parameter '$p', must be [$allowed_parameters]\n"
+                if $p !~ /^-(?:$allowed_parameters)$/i;
             $self->{'_' . lc substr($p,1)} = $p{$p};
         }
     } else {
@@ -181,11 +183,9 @@ sub unlock
 sub read
 {
     my $self = shift;
-    my $lock;
     my $str;
 
     if ($self->{_autolock}) {
-        $lock = $self->{_lock};
         $self->lock($self->{_timeout});
         $str = Peek($self->{_view});
         $self->unlock();
