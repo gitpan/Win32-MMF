@@ -1,0 +1,13 @@
+=============
+RELEASE NOTES
+=============
+
+What has been changed in this release?
+
+Win32::MMF
+- A bug in variable deletion is fixed
+- A bug in malloc (and realloc) is fixed
+
+Win32::MMF::Shareable
+- Added tied variable interface
+

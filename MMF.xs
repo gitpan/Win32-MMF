@@ -55,7 +55,7 @@ static void __dumpheap(MMF_DESCRIPTOR *mmf)
     printf("+== HEAP STRUCTURE ============================\n");
     for(m = (MMF_MAP*)mmf->m_heap_bot; m != NULL; m = m->next)
 	{
-		printf("| blk %5p: %6lu bytes %s\n", m, m->size, m->used ? "used" : "free");
+		printf("| blk %5p: %6lu bytes %s\n", (char*)m+sizeof(MMF_MAP), m->size, m->used ? "used" : "free");
 		if(m->used) {
 			blks_used++;
 			bytes_used += m->size;
@@ -131,12 +131,13 @@ static void *__malloc(MMF_DESCRIPTOR *mmf, unsigned size)
 	{
 		if(m->magic != MALLOC_MAGIC)
 		{
-			// printf("*** MMF is corrupt in Malloc()\n");
+			printf("*** MMF is corrupt in Malloc()\n");
 			return NULL;
 		}
 
 		for(; m->next != NULL; m = m->next)
 		{
+			// printf("*** print total=%ld size=%ld\n", total_size, m->size);
 			if(m->used) continue;
 
 			if((unsigned)size == m->size)		   // size == m->size is a perfect fit
@@ -144,7 +145,7 @@ static void *__malloc(MMF_DESCRIPTOR *mmf, unsigned size)
 			else
 			{	// otherwise, we need an extra sizeof(malloc_t) bytes for the header
 				// of a second, free block
-				if(total_size > m->size) continue;
+                if(total_size > m->size) continue;
 				n = (MMF_MAP *)((char *)m + total_size); // create a new, smaller free block after this one
 				n->size = m->size - total_size;
 				n->next = m->next;
@@ -156,12 +157,29 @@ static void *__malloc(MMF_DESCRIPTOR *mmf, unsigned size)
 			}
 			return (void *)((char *)m + sizeof(MMF_MAP));
 		}
+
+        if ((unsigned)size == m->size && !m->used) {
+            m->used = 1;
+            return (void *)((char *)m + sizeof(MMF_MAP));
+        } else
+
+        if (total_size < m->size && !m->used) {
+		    n = (MMF_MAP *)((char *)m + total_size); // create a new, smaller free block after this one
+			n->size = m->size - total_size;
+			n->next = m->next;
+			n->magic = MALLOC_MAGIC;
+			n->used = 0;	 // reduce the size of this block and mark it used
+			m->size = size;
+			m->next = n;
+			m->used = 1;
+			return (void *)((char *)m + sizeof(MMF_MAP));
+		}
 	}
 
 	delta = total_size;
     n = (MMF_MAP *)__nbrk(mmf, &delta);
 	if (n == NULL) {
-        // printf("*** __MALLOC: No NBRK\n");
+        printf("*** __MALLOC: No NBRK\n");
 		return NULL;
 	}
 	if(m != NULL) m->next = n;
@@ -232,7 +250,7 @@ static void __free(MMF_DESCRIPTOR *mmf, void *szMEMORY)
 			m->next = m->next->next;
 		}
 	}
-	
+
 	// __dumpheap(mmf);
 }
 
@@ -251,7 +269,7 @@ static void *__realloc(MMF_DESCRIPTOR *mmf, void *mem, unsigned size)
 		// allocate new block
 		new_blk = __malloc( mmf, size );
 		if (!new_blk) {
-            // printf("*** No more available memory\n");
+            printf("*** No more available memory\n");
 		}
 
 		// if allocation OK, and if old block exists, copy old block to new
@@ -260,7 +278,7 @@ static void *__realloc(MMF_DESCRIPTOR *mmf, void *mem, unsigned size)
 			m = (MMF_MAP *)((char *)mem - sizeof(MMF_MAP));
 			if(m->magic != MALLOC_MAGIC)
 			{
-				// printf("*** Attempt to Realloc() block at 0x%p with bad magic value\n", (char *)mem);
+				printf("*** Attempt to Realloc() block at 0x%p with bad magic value\n", (char *)mem);
 				return NULL;
 			}
 			// copy minimum of old and new block sizes
@@ -286,10 +304,7 @@ static MMF_VAR *__findvar(MMF_DESCRIPTOR *mmf, char *varname)
 		var = (MMF_VAR*)((char *)mmf + mmf->m_mmf_size - mmf->m_var_count * sizeof(MMF_VAR));
 
 		for (i=mmf->m_var_count-1;i>=0;i--) {
-			if (strcmp(var[i].v_name, varname) == 0) {
-			    // printf("FOUND VAR: %s (WANTED %s)\n", var[i].v_name, varname);
-				return &var[i];
-			}
+			if (strcmp(var[i].v_name, varname) == 0) return &var[i];
 		}
 	}
 
@@ -359,7 +374,7 @@ static int __setvar(MMF_DESCRIPTOR *mmf, char *varname, long type, char *value, 
 	       var->v_data = (long) __realloc(mmf, (void *)var->v_data, (unsigned)size);
 	    }
     }
-    
+
     var->v_size = size;
     var->v_type = type;
 
@@ -397,7 +412,7 @@ static long __getvartype(MMF_DESCRIPTOR *mmf, char *varname)
 
 static int __deletevar(MMF_DESCRIPTOR *mmf, char *varname)
 {
-	MMF_VAR *var, *m;
+	MMF_VAR *var, *m, *n;
 
     var = __findvar( mmf, varname );
     if (!var) return(0);
@@ -408,9 +423,10 @@ static int __deletevar(MMF_DESCRIPTOR *mmf, char *varname)
 
     // point to the beginning of the var table
     m = (MMF_VAR*)((char *)mmf + mmf->m_mmf_size - mmf->m_var_count * sizeof(MMF_VAR));
+
     if (mmf->m_heap_top != NULL) mmf->m_heap_top = (char *)(m + 1);
-    for (;m!=var;m++) {
-        m[1] = *m;
+    for (n=var;n!=m;n--) {
+        *n = *(n - 1);
     }
     mmf->m_var_count--;
 

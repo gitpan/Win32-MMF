@@ -4,7 +4,7 @@ require 5.00503;
 use strict;
 use warnings;
 use Carp;
-use Data::Serializer;
+use Storable 0.6 qw( freeze thaw );
 
 require Exporter;
 require DynaLoader;
@@ -22,16 +22,10 @@ our @EXPORT_OK = qw/
         Malloc Free DumpHeap
     /;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
-our $TRANSPORTER = Data::Serializer->new (
-                        serializer => 'Data::Dumper',
-                        portable   => '1',
-                        compress   => '0',
-                        serializer_token => '1',
-                        options  => {} )
-        or croak("No suitable data transporter found");
 
+# croak "This module can only be used under Windows!" if $^O ne "MSWin32";
 
 bootstrap Win32::MMF $VERSION;
 
@@ -43,7 +37,7 @@ bootstrap Win32::MMF $VERSION;
 sub ClaimNamespace {
     my ($swapfile, $namespace, $size) = @_;
     $size = 128 * 1024 if !$size;    # namespace 128K by default
-    
+
     # attempt to use existing namespace
     my $ns = OpenFileMapping($namespace);
 
@@ -102,7 +96,7 @@ sub new
         _ns        => 0,           # namespace handle
         _view      => 0,           # view handle
         _timeout   => 10,          # default timeout value
-        _semaphore => 0,           # semaphore used for locking
+        _semaphore => 0,           # semaphore used for exclusive locking
         _debug     => 0,           # debug mode indicator
     };
 
@@ -206,8 +200,10 @@ sub getvar
     if ($self->{_autolock}) {
         return undef if !$self->lock($self->{_timeout});
         $type = GetVarType($self->{_view}, $varname);
-        $self->unlock(), return undef if !defined $type;
-        $str = GetVar($self->{_view}, $varname);
+
+        if (defined $type) {
+            $str = GetVar($self->{_view}, $varname);
+        }
         $self->unlock();
     } else {
         $type = GetVarType($self->{_view}, $varname);
@@ -217,7 +213,7 @@ sub getvar
     }
 
     if (defined $str && $type) {
-           $str = $TRANSPORTER->deserialize($str);
+        $str = thaw($str);
     }
 
     return $str;
@@ -231,19 +227,19 @@ sub setvar
     return 0 if !$varname;
 
     my $str;        # simple string or serialized object string
-    my $type = 0;   # type of the string, 0 = simple, 1 = serialized
+    my $type = 0;   # type of the string 0 = simple, 1 = complex
 
     if (@_ == 1) {
         $str = shift;
         if (ref $str) {
             # serialize if a complex structure
-            $str = $TRANSPORTER->serialize($str);
+            $str = freeze($str);
             $type = 1;
         }
         # simple string by default
     } else {
         # always serialize if more than 1 data members
-        $str = $TRANSPORTER->serialize(@_);
+        $str = freeze($str);
         $type = 1;
     }
 
@@ -286,7 +282,6 @@ sub debug
     DumpHeap($self->{_view});
 }
 
-
 1;
 
 =pod
@@ -297,6 +292,7 @@ sub debug
 
 =head1 SYNOPSIS
 
+ # Object-oriented style
  use Win32::MMF;
 
  # --- in process 1 ---
@@ -312,6 +308,19 @@ sub debug
  $ns->deletevar('varid');
 
 
+ # Tied variable style
+ use Win32::MMF::Shareable;
+ Win32::MMF::Shareable::Init( -namespace => "MySharedMem" );
+
+ # --- in process 1 ---
+ tie $data, "Win32::MMF::Shareable", "varid";
+ $data = 'Hello world!";
+
+ # --- in process 2 ---
+ tie $data, "Win32::MMF::Shareable", "varid";
+ print "$data\n";
+
+
 =head1 ABSTRACT
 
 This module provides Windows' native Memory Mapped File Service
@@ -319,7 +328,7 @@ for shared memory support under Windows. The core of the module
 is written in XS and is currently supported only under Windows
 NT/2000/XP.
 
-The current version 0.04 of Win32::MMF is available on CPAN at:
+The current version 0.05 of Win32::MMF is available on CPAN at:
 
   http://search.cpan.org/search?query=Win32::MMF
 
@@ -328,11 +337,11 @@ The current version 0.04 of Win32::MMF is available on CPAN at:
 
 =head2 Programming Style
 
-This module provides two types of interfaces - an object-oriented
-and a functional interface. The default access method is via objects.
-The functional interface is not exported by default because it
-requires a detailed knowledge of the Windows operating system
-internals to use properly.
+This module provides three types of interfaces - object-oriented,
+functional, and tied interfaces (Via C<Win32::MMF::Shareable>).
+The default access method is via objects. The functional interface
+is not exported by default because it requires a detailed knowledge
+of the Windows operating system internals to use properly.
 
 There are many advantages of using the object oriented interface.
 For example, the following is the amount of code required in
@@ -368,11 +377,32 @@ result in object-oriented style:
                              -namespace => "MyDataShare",
                              -size => 2 * 1024 * 1024 )
        or die "Can not create namespace";
-
+       
 Note that there is no need to explicitly unmap the view, close the
 namespace and close the swap file in object-oriented mode, the view,
 namespace and swap file handles are automatically closed-off and
 disposed of when the Win32::MMF object falls out of scope.
+
+The following is the amount of code required in tied variable style,
+which virtually eliminates all hassles dealing with shared memory
+under Windows... :-)
+
+    use Win32::MMF::Shareable;
+    Win32::MMF::Shareable::Init( -swapfile => "data.swp",
+                                 -namespace => "MyDataShare",
+                                 -size => 2 * 1024 * 1024 )
+       or die "Can not create namespace";
+
+    ...
+
+    tie my $scalar, "Win32::MMF::Shareable", "scalar1";
+    $scalar = "Hello world";
+
+    tie my %hash = "Win32::MMF::Shareable", "hash1";
+    %hash = ( A => '1', B => '2', C => '3' );
+
+    tie my @array = "Win32::MMF::Shareable", "array1";
+    @array = qw/ A B C D E /;
 
 
 =head1 REFERENCE
@@ -540,7 +570,7 @@ $ns->unlock();
 
 All read and write accesses to a namespace are locked
 by default to preserve data integrity across processes.
-The excellent L<Data::Serializer> module is used for
+The L<Storeable> module is used for
 data serialization for complex structures.
 
 =head2 Variables inside a Namespace
@@ -579,8 +609,8 @@ shared memory but also delete the variable from the namespace.
 
 Retrieves the serialized data string from the namespace,
 and deserializes back into perl variable(s). Please refer to
-the L<Data::Serializer> documentation on how to serialize and
-retrieve data. Simple scalars are not serialized however to
+the L<Storeable> documentation on how to serialize (freeze) and
+retrieve (thaw) data. Simple scalars are not serialized however to
 maximize the access efficiency.
 
 =item $ns->deletevar('VarId');
@@ -588,6 +618,10 @@ maximize the access efficiency.
 Delete the given variable from the namespace and free up
 shared memory allocated to the variable. This is equivalent
 to setting a variable to undef.
+
+=item if ($ns->findvar('VarId')) { ... }
+
+Test for the existance of a given variable inside the namespace.
 
 
 =back
@@ -606,8 +640,49 @@ heap and variable definition table for the namespace.
 
 =back
 
-=back
+=head2 Using Tied Variable Interface
 
+The Win32::MMF::Shareable module is modelled after C<IPC::Shareable>.
+All options from C<IPC::Shareable> can be used in Win32::MMF::Shareable,
+although they are mostly ignored except for the 'label' argument.
+Because memory and variable management are managed internally by the
+Win32::MMF module, you do not need to specify how much memory is
+required by the variable.
+
+All access to tied variables are automatically and exclusively locked
+to preserve data integrity across multiple processes.
+
+Win32::MMF::Shareable mimics the operation of C<IPC::Shareable>,
+it allows you to tie a variable to a namespace (shared memory)
+making it easy to share its content with other Perl processes.
+
+Note that before trying to tie a variable to a namespace, you need to
+initialize the namespace first. You can do this after the
+I<use Win32::MMF::Shareable;> statement:
+
+ use Win32::MMF::Shareable;
+ Win32::MMF::Shareable::Init( -namespace => ... );
+
+The options are exactly the same as the Win32::MMF constructor options.
+
+Currently only scalars, arrays, and hashes can be tied, I am investigating
+on the possibilities with tied file handles at the moment.
+
+To tie a variable to the namespace:
+
+ tie $scalar, "Win32::MMF::Shareable", "var_1";
+ tie @array,  "Win32::MMF::Shareable", "var_2";
+ tie %hash,   "Win32::MMF::Shareable", "var_3";
+
+And to use a tied variable:
+
+ $scalar = 'Hello Perl';
+
+ @array = qw/ A B C D E F G /;
+
+ %hash = @array;
+
+=back
 
 =head1 EXAMPLE 1 - setvar, getvar and deletevar
 
@@ -642,70 +717,37 @@ heap and variable definition table for the namespace.
 
  use strict;
  use warnings;
- use Win32::MMF;
- use Data::Dumper;
- use CGI;
+ use Win32::MMF::Shareable;
 
- # fork a process
+ Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
+
  defined(my $pid = fork()) or die "Can not fork a child process!";
 
- if ($pid) {
-    my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
-                                -size => 1024 * 1024 );
+ if (!$pid) {
+    tie my $sig1, "Win32::MMF::Shareable", '$signal1';
+    tie my $sig2, "Win32::MMF::Shareable", '$signal2';
 
-    my $cgi = new CGI;
-    my $hash = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
-    my $str = "Hello World!";
+    print "PROC1 WAIT SIGNAL 2\n";
+    while (!$sig2) {};
+    print "PROC1 SEND SIGNAL 1\n";
 
-    $ns1->setvar("MyMMF.HASH", $hash);
-    $ns1->setvar("MyMMF.CGI", $cgi);
-    $ns1->setvar("MyMMF.STRING", $str);
-
-    print "--- PROC1 - Sent ---\n";
-    print Dumper($hash), "\n";
-    print Dumper($cgi), "\n";
-    print Dumper($str), "\n";
-
-    # signal proc 2
-    $ns1->setvar("MyMMF.SIG", '');
-
-    # wait for ACK variable to come alive
-    do {} while ! $ns1->findvar("MyMMF.ACK");
-    $ns1->deletevar("MyMMF.ACK");
-
-    # debug current MMF structure
-    $ns1->debug();
-
+    $sig1 = 1;
  } else {
+    tie my $sig1, "Win32::MMF::Shareable", '$signal1';
+    tie my $sig2, "Win32::MMF::Shareable", '$signal2';
 
-    my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
-                                -size => 1024 * 1024 );
+    print "PROC2 SEND SIGNAL 2\n";
+    $sig2 = 1;
+    print "PROC2 WAIT SIGNAL 1\n";
+    while (!$sig1) {};
 
-    do {} while !$ns1->findvar("MyMMF.SIG");
-    $ns1->deletevar("MyMMF.SIG");
-
-    my $hash = $ns1->getvar("MyMMF.HASH");
-    my $cgi = $ns1->getvar("MyMMF.CGI");
-    my $str = $ns1->getvar("MyMMF.STRING");
-
-    print "--- PROC2 - Received ---\n";
-    print Dumper($hash), "\n";
-    print Dumper($cgi), "\n";
-
-    print "--- PROC2 - Use Received Object ---\n";
-    # use the object from another process :-)
-    print $cgi->header(),
-          $cgi->start_html(), "\n",
-          $cgi->end_html(), "\n\n";
-
-    # signal proc 1
-    $ns1->setvar("MyMMF.ACK", '');
+    print "PROC2 GOT SIGNAL 1\n";
  }
 
 
 =head1 SEE ALSO
 
-L<Data::Serializer>
+C<Win32::MMF::Shareable>
 
 =head1 CREDITS
 

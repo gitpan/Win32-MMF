@@ -4,6 +4,10 @@ use Win32::MMF;
 use Data::Dumper;
 use CGI;
 
+# Process synchronization between processes
+# Object Oriented Approach
+
+
 # fork a process
 defined(my $pid = fork()) or die "Can not fork a child process!";
 
@@ -15,9 +19,9 @@ if ($pid) {
    my $hash = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
    my $str = "Hello World!";
 
-   $ns1->setvar("MyMMF.HASH", $hash);
-   $ns1->setvar("MyMMF.CGI", $cgi);
-   $ns1->setvar("MyMMF.STRING", $str);
+   $ns1->setvar("HASH", $hash);
+   $ns1->setvar("CGI", $cgi);
+   $ns1->setvar("STRING", $str);
 
    print "--- PROC1 - Sent ---\n";
    print Dumper($hash), "\n";
@@ -25,11 +29,11 @@ if ($pid) {
    print Dumper($str), "\n";
 
    # signal proc 2
-   $ns1->setvar("MyMMF.SIG", '');
+   $ns1->setvar("SIG", 1);
 
    # wait for ACK variable to come alive
-   do {} while ! $ns1->findvar("MyMMF.ACK");
-   $ns1->deletevar("MyMMF.ACK");
+   while (!$ns1->getvar("ACK")) {};
+   $ns1->setvar("ACK", '');
 
    # debug current MMF structure
    $ns1->debug();
@@ -39,12 +43,12 @@ if ($pid) {
    my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
                                -size => 1024 * 1024 );
 
-   do {} while !$ns1->findvar("MyMMF.SIG");
-   $ns1->deletevar("MyMMF.SIG");
+   while (!$ns1->getvar("SIG")) {};
+   $ns1->setvar("SIG", '');
 
-   my $hash = $ns1->getvar("MyMMF.HASH");
-   my $cgi = $ns1->getvar("MyMMF.CGI");
-   my $str = $ns1->getvar("MyMMF.STRING");
+   my $cgi = $ns1->getvar("CGI");
+   my $str = $ns1->getvar("STRING");
+   my $hash = $ns1->getvar("HASH");
 
    print "--- PROC2 - Received ---\n";
    print Dumper($hash), "\n";
@@ -57,5 +61,6 @@ if ($pid) {
          $cgi->end_html(), "\n\n";
 
    # signal proc 1
-   $ns1->setvar("MyMMF.ACK", '');
+   $ns1->setvar("ACK", 1);
 }
+

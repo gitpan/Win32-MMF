@@ -1,11 +1,9 @@
 #######################################################################
 #
 # Win32::MMF - Win32 Memory Mapped File Support for Perl
-# Version: 0.03 (06 Feb 2004)
-# 
-# Author: Roger Lee <roger@cpan.org>
+# Version: 0.05 (10 Feb 2004)
 #
-# $Id: Readme.txt,v 1.3 2004/02/07 15:48:02 Roger Lee Exp $
+# Author: Roger Lee <roger@cpan.org>
 #
 #######################################################################
 
@@ -18,18 +16,30 @@ The current version of Win32::MMF is available on CPAN at:
 
 The following is a quick overview of the look and feel of the module:
 
+  # ===== Object Oriented Interface =====
   use Win32::MMF;
-  
+
   # --- in process 1 ---
-  my $ns1 = Win32::MMF->new( -namespace => "MyData1" );
+  my $ns1 = Win32::MMF->new( -namespace => "MySharedmem" );
 
   $ns1->setvar('varid', $data);
 
   # --- in process 2 ---
-  my $ns2 = Win32::MMF->new( -namespace => "MyData1", -reuse => 1 )
+  my $ns2 = Win32::MMF->new( -namespace => "MySharedmem" )
           or die "namespace not exist";
 
   $data = $ns2->getvar('varid');
+
+
+  # ==== Tied Interface ====
+  use Win32::MMF::Shareable;
+  Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
+  
+  tie my $scalar, "Win32::MMF::Shareable", "varid";
+  $scalar = 'Hello world';
+
+  tie my $s2, "Win32::MMF::Shareable", "varid";
+  print "$s2\n";    # should print 'Hello world'
 
 
 Full documentation is available in POD format inside MMF.pm.
