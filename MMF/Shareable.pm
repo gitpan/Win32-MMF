@@ -10,11 +10,12 @@ require Exporter;
 require DynaLoader;
 
 our @ISA = qw/ Exporter /;
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 # ------------------- Tied Interface -------------------
 
-our $ns;
+my $ns;
+my $locking_level = 0;
 
 sub import {
     my $class = shift;
@@ -47,6 +48,30 @@ sub namespace {
     return $ns;
 }
 
+sub lock {
+    return if !$ns;
+    $ns->lock() if $locking_level;
+    $locking_level++;
+}
+
+sub unlock {
+    return if !$ns;
+    $locking_level--;
+    $ns->unlock() if !$locking_level;
+}
+
+sub shlock {
+    return if !$ns;
+    $ns->lock() if $locking_level;
+    $locking_level++;
+}
+
+sub shunlock {
+    return if !$ns;
+    $locking_level--;
+    $ns->unlock() if !$locking_level;
+}
+
 sub debug {
     $ns && $ns->debug();
 }
@@ -65,7 +90,7 @@ sub TIEHASH {
 
 sub CLEAR {
     my $self = shift;
-    $ns->lock();
+    $self->lock();
     $ns->setvar($self->{_key}, '');
     if ($self->{_type} eq 'A') {
         $self->{_data} = [];
@@ -74,15 +99,15 @@ sub CLEAR {
     } else {
         croak "Attempt to clear non-aggegrate";
     }
-    $ns->unlock();
+    $self->unlock();
 }
 
 sub EXTEND { }
 
 sub STORE {
     my $self = shift;
-    $ns->lock();
-    # $self->{_data} = $ns->getvar($self->{_key});
+    $self->lock();
+    $self->{_data} = $ns->getvar($self->{_key});
 
 TYPE: {
         if ($self->{_type} eq 'S') {
@@ -107,7 +132,7 @@ TYPE: {
     $ns->setvar($self->{_key}, $self->{_data}) or
         croak("Out of memory!");
 
-    $ns->unlock();
+    $self->unlock();
 
     return 1;
 }
@@ -115,7 +140,7 @@ TYPE: {
 sub FETCH {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
 
     if ($self->{_iterating}) {
         $self->{_iterating} = ''
@@ -128,9 +153,10 @@ TYPE: {
         if ($self->{_type} eq 'S') {
             if (defined $self->{_data}) {
                 $val = $self->{_data};
+                # print "FETCH: $val\n";
                 last TYPE;
             } else {
-                $ns->unlock();
+                $self->unlock();
                 return;
             }
         }
@@ -140,7 +166,7 @@ TYPE: {
                 $val = $self->{_data}->[$i];
                 last TYPE;
             } else {
-                $ns->unlock();
+                $self->unlock();
                 return;
             }
         }
@@ -150,14 +176,14 @@ TYPE: {
                 $val = $self->{_data}->{$key};
                 last TYPE;
             } else {
-                $ns->unlock();
+                $self->unlock();
                 return;
             }
         }
         croak "Variables of type $self->{_type} not supported";
     }
 
-    $ns->unlock();
+    $self->unlock();
 
     return $val;
 }
@@ -168,13 +194,13 @@ sub DELETE {
     my $self = shift;
     my $key  = shift;
 
-    $ns->lock();
+    $self->lock();
 
     $self->{_data} = $ns->getvar($self->{_key}) || {};
     my $val = delete $self->{_data}->{$key};
     $ns->setvar($self->{_key}, $self->{_data});
 
-    $ns->unlock();
+    $self->unlock();
 
     return $val;
 }
@@ -183,9 +209,9 @@ sub EXISTS {
     my $self = shift;
     my $key  = shift;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || {};
-    $ns->unlock();
+    $self->unlock();
 
     return exists $self->{_data}->{$key};
 }
@@ -196,13 +222,13 @@ sub FIRSTKEY {
 
     $self->{_iterating} = 1;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || {};
 
     my $reset = keys %{$self->{_data}}; # reset
     my $first = each %{$self->{_data}};
 
-    $ns->unlock();
+    $self->unlock();
 
     return $first;
 }
@@ -225,9 +251,9 @@ sub NEXTKEY {
 sub FETCHSIZE {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || [];
-    $ns->unlock();
+    $self->unlock();
 
     return scalar(@{$self->{_data}});
 }
@@ -236,11 +262,11 @@ sub STORESIZE {
     my $self = shift;
     my $n    = shift;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || [];
     $#{@{$self->{_data}}} = $n - 1;
     $ns->setvar($self->{_key}, $self->{_data});
-    $ns->unlock();
+    $self->unlock();
 
     return $n;
 }
@@ -248,11 +274,11 @@ sub STORESIZE {
 sub SHIFT {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || [];
     my $val = shift @{$self->{_data}};
     $ns->setvar($self->{_key}, $self->{_data});
-    $ns->unlock();
+    $self->unlock();
 
     return $val;
 }
@@ -260,11 +286,11 @@ sub SHIFT {
 sub UNSHIFT {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || [];
     my $val = unshift @{$self->{_data}} => @_;
     $ns->setvar($self->{_key}, $self->{_data});
-    $ns->unlock();
+    $self->unlock();
 
     return $val;
 }
@@ -272,11 +298,11 @@ sub UNSHIFT {
 sub SPLICE {
     my($self, $off, $n, @av) = @_;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || [];
     my @val = splice @{$self->{_data}}, $off, $n => @av;
     $ns->setvar($self->{_key}, $self->{_data});
-    $ns->unlock();
+    $self->unlock();
 
     return @val;
 }
@@ -284,7 +310,7 @@ sub SPLICE {
 sub PUSH {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
 
     $self->{_data} = $ns->getvar($self->{_key});
 
@@ -296,17 +322,17 @@ sub PUSH {
     $ns->setvar($self->{_key}, $self->{_data}) or
         croak "Not enough shared memory";
 
-    $ns->unlock();
+    $self->unlock();
 }
 
 sub POP {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
     $self->{_data} = $ns->getvar($self->{_key}) || [];
     my $val = pop @{$self->{_data}};
     $ns->setvar($self->{_key}, $self->{_data});
-    $ns->unlock();
+    $self->unlock();
 
     return $val;
 }
@@ -314,9 +340,9 @@ sub POP {
 sub UNTIE {
     my $self = shift;
 
-    $ns->lock();
+    $self->lock();
     $ns->deletevar($self->{_key}, undef);
-    $ns->unlock();
+    $self->unlock();
 }
 
 

@@ -22,7 +22,7 @@ our @EXPORT_OK = qw/
         Malloc Free DumpHeap
     /;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
 
 croak "This module can only be used under Windows!" if $^O ne "MSWin32";

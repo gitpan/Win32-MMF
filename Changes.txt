@@ -1,7 +1,16 @@
 # ===========================================================================
 # CHANGES
-# $Id: Changes.txt,v 1.5 2004/02/14 22:59:25 Roger Lee Exp $
+# $Id: Changes.txt,v 1.6 2004/02/16 14:35:32 Roger Lee Exp $
 # ===========================================================================
+
+0.08
+    [INTERNALS]
+    - Fixed a bug with STORE not reading the shared variable before storing.
+    
+    [ENHANCEMENTS]
+    - Added ability to explicit lock a logical block of code that accesses
+      critical information, instead of locking on individual fetch and store,
+      which might result in raise condition between several processes.
 
 0.07
     [ENHANCEMENTS]

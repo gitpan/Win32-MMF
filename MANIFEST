@@ -25,4 +25,5 @@ MMF.h
 MMF.pm
 MMF.xs
 MMF/Shareable.pm
+MMF_guts.txt
 Readme.txt
