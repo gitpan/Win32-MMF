@@ -5,7 +5,6 @@ use strict;
 use warnings;
 use Carp;
 use Storable 0.6 qw( freeze thaw );
-use Win32::Semaphore;
 
 require Exporter;
 require DynaLoader;
@@ -18,12 +17,14 @@ our @EXPORT_OK = qw/
         CreateFileMapping OpenFileMapping
         MapViewOfFile UnmapViewOfFile
         ClaimNamespace ReleaseNamespace UseNamespace
+        CreateSemaphore WaitForSingleObject ReleaseSemaphore
         InitMMF CreateVar FindVar SetVar GetVar GetVarType DeleteVar
         Malloc Free DumpHeap
     /;
 
 our $VERSION = '0.09';
 our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
+our $LOCKFLAG = 0;
 
 croak "This module can only be used under Windows!" if $^O ne "MSWin32";
 
@@ -51,9 +52,8 @@ sub ClaimNamespace {
             croak "Can not create swapfile: $!" if !$swap;
         }
 
-        # create a 1000-byte long shared memory namespace
         $ns = CreateFileMapping($swap, $size, $namespace);
-        $INITFLAG++;   # tell the constructor to initialize MMF
+        $INITFLAG = 1;   # tell the constructor to initialize MMF
     }
 
     return ($swap, $ns);
@@ -64,7 +64,7 @@ sub ClaimNamespace {
 sub ReleaseNamespace {
     my ($swp, $ns) = @_;
     CloseHandle($ns) if $ns;
-    # CloseHandle($swp) if $swp;
+    CloseHandle($swp) if $swp;
 }
 
 
@@ -149,7 +149,7 @@ sub new
     InitMMF($self->{_view}, $self->{_size}) if $INITFLAG;
 
     # create semaphore object for the view
-    $self->{_semaphore} = Win32::Semaphore->new(1,1,$self->{_namespace} . '.lock')
+    $self->{_semaphore} = CreateSemaphore(1, 1, $self->{_namespace} . '.lock')
         or croak("Can not create semaphore!");
 
     bless $self, $class;
@@ -158,13 +158,9 @@ sub new
 
 sub DESTROY {
     my $self = shift;
-    
-    $INITFLAG--;
 
     # unmap existing views
-    for my $view_id (keys %{$self->{_views}}) {
-        UnmapViewOfFile($self->{_views}{$view_id}{view});
-    }
+    UnmapViewOfFile($self->{_view});
 
     # close namespace and swap file
     ReleaseNamespace($self->{_swap}, $self->{_ns});
@@ -174,15 +170,22 @@ sub DESTROY {
 sub lock
 {
     my ($self, $timeout) = @_;
+    my $result;
+
     $timeout = $self->{_timeout} if !$timeout;
-    $self->{_semaphore}->wait($timeout);
+    $result = WaitForSingleObject($self->{_semaphore}, $timeout) if !$LOCKFLAG;
+
+    $LOCKFLAG++;
+    return $result;
 }
 
 
 sub unlock
 {
     my $self = shift;
-    $self->{_semaphore}->release();
+    $LOCKFLAG--;
+    return 0 if $LOCKFLAG;
+    return ReleaseSemaphore($self->{_semaphore}, 1);
 }
 
 

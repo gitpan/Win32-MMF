@@ -1,7 +1,12 @@
 # ===========================================================================
 # CHANGES
-# $Id: Changes.txt,v 1.7 2004/02/18 20:55:15 Roger Lee Exp $
+# $Id: Changes.txt,v 1.8 2004/02/20 15:17:49 Roger Lee Exp $
 # ===========================================================================
+
+0.09c
+    [INTERNALS]
+    - Untie a variable will not erase existing data.
+    - Switched from Win32::Semaphore to use own locking mechanism.
 
 0.09
     [INTERNALS]

@@ -15,7 +15,6 @@ our $VERSION = '0.05';
 # ------------------- Tied Interface -------------------
 
 our $ns;
-our $locking_level = 0;
 
 sub import {
     my $class = shift;
@@ -49,23 +48,19 @@ sub namespace {
 }
 
 sub lock {
-    $ns->lock() if !$locking_level;
-    $locking_level++;
+    $ns->lock();
 }
 
 sub unlock {
-    $locking_level--;
-    $ns->unlock() if !$locking_level;
+    $ns->unlock();
 }
 
 sub shlock {
-    $ns->lock() if !$locking_level;
-    $locking_level++;
+    $ns->lock();
 }
 
 sub shunlock {
-    $locking_level--;
-    $ns->unlock() if !$locking_level;
+    $ns->unlock();
 }
 
 sub debug {
@@ -334,10 +329,6 @@ sub POP {
 
 sub UNTIE {
     my $self = shift;
-
-    $self->lock();
-    $ns->deletevar($self->{_key}, undef);
-    $self->unlock();
 }
 
 
@@ -376,10 +367,6 @@ sub _tie {
     croak "The label/key for the tied variable must be defined!" if !$self->{_key};
 
     init_with_default_settings() if ! $ns;
-
-    #$ns->lock();
-    #$ns->setvar($self->{_key}, '') if !$ns->findvar($self->{_key});
-    #$ns->unlock();
 
     bless $self, $class;
 }
