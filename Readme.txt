@@ -18,25 +18,36 @@ The current version of Win32::MMF is available on CPAN at:
 
 The following is a list of the functions implemented in this module:
 
-  $debugmode = mmf_GetDebugMode();		# 0 - off, 1 - on
-  mmf_SetDebugMode($debugmode);
+  $debugmode = GetDebugMode();		# 0 - off, 1 - on
+  SetDebugMode($debugmode);
 
-  $fh = mmf_CreateFile($filename);		# Create new swap file
-  $fh = mmf_OpenFile($filename);		# Open existing swap file
-  mmf_CloseHandle($fh);				# Close openned swap file handle
+  $fh = CreateFile($filename);		# Create new swap file
+  $fh = OpenFile($filename);		# Open existing swap file
+  CloseHandle($fh);				    # Close openned swap file handle
 
-  $ns = mmf_CreateFileMapping($filehandle, $filesize, $namespace);
-  $ns = mmf_OpenFileMapping($namespace);	# Use existing namespace
-  mmf_CloseHandle($ns);				# Close openned namespace
+  $ns = CreateFileMapping($filehandle, $filesize, $namespace);
+  $ns = OpenFileMapping($namespace);	# Use existing namespace
+  CloseHandle($ns);				        # Close openned namespace
 
-  $var = mmf_MapViewOfFile($ns, $offset, $size)	# Create a view inside the namespace
-  mmf_UnmapViewOfFile($var);			# Delete the view
+  $var = MapViewOfFile($ns, $offset, $size)	# Create a view inside the namespace
+  UnmapViewOfFile($var);			        # Delete the view
 
-  mmf_Poke($var, $str, length($str));		# Store a string into view
-  $str = mmf_Peek($var);			# Retrieve a string from the view
+  Poke($var, $str, length($str));		# Store a string into view
+  $str = Peek($var);			        # Retrieve a string from the view
 
-  mmf_PokeIV($var, $i);				# Store a number(long) into view
-  $i = mmf_PeekIV($var);			# Retrieve a number from the view
+  PokeIV($var, $i);				        # Store a number(long) into view
+  $i = PeekIV($var);			        # Retrieve a number from the view
+
+  # High-level Namespace Functions
+
+  # claim a swapfile to use as namespace (default size is 64k)
+  # if $swapfile is undef, will use system page file instead
+
+  ($swp, $ns) = ClaimNamespace($swapfile, $namespace [, $size]);
+
+  ReleaseNamespace($swp, $namespace);
+
+  $ns = UseNamespace($namespace);  # use existing namespace
 
 
 Full documentation is available in POD format inside MMF.pm.
@@ -45,3 +56,4 @@ This is the first release of the module and the functionality is limited.
 But it will not stay that way for long as I will add more functionality soon.
 
 Enjoy. ;-)
+

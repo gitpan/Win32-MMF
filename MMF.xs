@@ -37,7 +37,7 @@ BOOT:
     }
 
 
-void mmf_SetDebugMode(IV mode)
+void SetDebugMode(IV mode)
 PREINIT:
     dMY_CXT;
 CODE:
@@ -46,7 +46,7 @@ CODE:
 }
 
 
-IV mmf_GetDebugMode(void)
+IV GetDebugMode(void)
 PREINIT:
     dMY_CXT;
 CODE:
@@ -57,14 +57,14 @@ OUTPUT:
     RETVAL
 
 
-IV mmf_CreateFile(char *szMapFileName)
+IV CreateFile(char *szMapFileName)
 PREINIT:
     dMY_CXT;
     HANDLE hFile = NULL;
 CODE:
 {
     if (strlen(szMapFileName) > 0) {
-        if (MY_CXT.debug) printf("mmf_CreateFile: filename=%s\n", szMapFileName);
+        if (MY_CXT.debug) printf("CreateFile: filename=%s\n", szMapFileName);
 
         hFile = CreateFile(
                     szMapFileName,
@@ -77,7 +77,7 @@ CODE:
 
         if (hFile == (HANDLE)INVALID_HANDLE_VALUE)
         {
-        	if (MY_CXT.debug) printf("mmf_CreateFile: Failed to create %s\n", szMapFileName);
+        	if (MY_CXT.debug) printf("CreateFile: Failed to create %s\n", szMapFileName);
 
         	XSRETURN_UNDEF;
         }
@@ -89,7 +89,7 @@ OUTPUT:
     RETVAL
 
 
-IV mmf_OpenFile(char *szMapFileName)
+IV OpenFile(char *szMapFileName)
 PREINIT:
     dMY_CXT;
     HANDLE hFile = NULL;
@@ -97,12 +97,12 @@ PREINIT:
 CODE:
 {
     if (strlen(szMapFileName) > 0) {
-        if (MY_CXT.debug) printf("mmf_OpenFile: filename=%s\n", szMapFileName);
+        if (MY_CXT.debug) printf("OpenFile: filename=%s\n", szMapFileName);
 
         if ((hFile = (HANDLE) OpenFile (szMapFileName, &of, OF_READWRITE)) == (HANDLE)HFILE_ERROR)
         {
             if (MY_CXT.debug)
-                printf("mmf_OpenFile: Failed to open %s\n", szMapFileName);
+                printf("OpenFile: Failed to open %s\n", szMapFileName);
 
         	XSRETURN_UNDEF;
         }
@@ -114,7 +114,7 @@ OUTPUT:
     RETVAL
 
 
-IV mmf_CreateFileMapping(IV szMapFileHandle, IV szMapFileSize, char *szNameSpace)
+IV CreateFileMapping(IV szMapFileHandle, IV szMapFileSize, char *szNameSpace)
 PREINIT:
     dMY_CXT;
     HANDLE hmmFile = NULL;
@@ -126,7 +126,7 @@ CODE:
     }
 
     if (MY_CXT.debug) {
-        printf( "mmf_CreateFileMapping: %s (size=%ld, namespace=%s)\n",
+        printf( "CreateFileMapping: %s (size=%ld, namespace=%s)\n",
                 szMapFileHandle ? "ext-swap" : "system-swap",
                 szMapFileSize,
                 strlen(szNameSpace)==0 ? "undefined" : szNameSpace);
@@ -140,7 +140,7 @@ CODE:
                                szNameSpace);
 
     if (!hmmFile && MY_CXT.debug) {
-        printf("mmf_CreateFileMapping: Error creating file mapping\n");
+        printf("CreateFileMapping: Error creating file mapping\n");
         XSRETURN_UNDEF;
     }
 
@@ -150,7 +150,7 @@ OUTPUT:
     RETVAL
 
 
-IV mmf_OpenFileMapping(char *szNameSpace)
+IV OpenFileMapping(char *szNameSpace)
 PREINIT:
     dMY_CXT;
     HANDLE hFile = NULL;
@@ -160,7 +160,7 @@ CODE:
     if (strlen(szNameSpace) > 0)
     {
         if (MY_CXT.debug) {
-            printf("mmf_OpenFileMapping: namespace=%s\n", szNameSpace);
+            printf("OpenFileMapping: namespace=%s\n", szNameSpace);
         }
 
         hFile = OpenFileMapping(FILE_MAP_WRITE,
@@ -170,7 +170,7 @@ CODE:
         if (hFile == (HANDLE)INVALID_HANDLE_VALUE)
         {
         	if (MY_CXT.debug)
-                printf("mmf_OpenFileMapping: invalid object/namespace %s\n", szNameSpace);
+                printf("OpenFileMapping: invalid object/namespace %s\n", szNameSpace);
 
         	XSRETURN_UNDEF;
         }
@@ -183,7 +183,7 @@ OUTPUT:
 
 
 
-IV mmf_MapViewOfFile(IV szMemoryMapFileHandle, IV offset, IV size)
+IV MapViewOfFile(IV szMemoryMapFileHandle, IV offset, IV size)
 PREINIT:
     dMY_CXT;
     LPVOID mem;
@@ -204,7 +204,7 @@ OUTPUT:
     RETVAL
 
 
-void mmf_UnmapViewOfFile(IV szView)
+void UnmapViewOfFile(IV szView)
 PREINIT:
     dMY_CXT;
     LPVOID mem;
@@ -217,7 +217,7 @@ CODE:
 }
 
 
-void mmf_CloseHandle(IV szHandle)
+void CloseHandle(IV szHandle)
 PREINIT:
     dMY_CXT;
 CODE:
@@ -228,7 +228,7 @@ CODE:
 }
 
 
-void mmf_PokeIV(IV szView, IV value)
+void PokeIV(IV szView, IV value)
 PREINIT:
     dMY_CXT;
 CODE:
@@ -239,7 +239,7 @@ CODE:
 }
 
 
-IV mmf_PeekIV(IV szView)
+IV PeekIV(IV szView)
 PREINIT:
     dMY_CXT;
 CODE:
@@ -252,7 +252,7 @@ OUTPUT:
     RETVAL
 
 
-void mmf_Poke(IV szView, char *value, IV size)
+void Poke(IV szView, char *value, IV size)
 PREINIT:
     dMY_CXT;
 CODE:
@@ -264,7 +264,7 @@ CODE:
 }
 
 
-SV *mmf_Peek(IV szView)
+SV *Peek(IV szView)
 PREINIT:
     dMY_CXT;
     IV size;
