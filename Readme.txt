@@ -5,7 +5,7 @@
 # 
 # Author: Roger Lee <roger@cpan.org>
 #
-# $Id: Readme.txt,v 1.2 2004/02/06 15:44:19 Roger Lee Exp $
+# $Id: Readme.txt,v 1.3 2004/02/07 15:48:02 Roger Lee Exp $
 #
 #######################################################################
 
@@ -26,7 +26,7 @@ The following is a quick overview of the look and feel of the module:
   $ns1->write($data);   # autolock by default
 
   # --- in process 2 ---
-  my $ns2 = Win32::MMF->new( -namespace => "MyData1", -nocreate => 1 )
+  my $ns2 = Win32::MMF->new( -namespace => "MyData1", -reuse => 1 )
           or die "namespace not exist";
 
   $data = $ns2->read(); # autolock by default

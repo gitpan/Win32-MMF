@@ -93,7 +93,7 @@ sub new
         _namespace => undef,
         _size      => 64 * 1024,   # 64k namespace by default
         _swapfile  => undef,       # use windows virtual memory
-        _nocreate  => 0,           # do not create namespace if does not exist
+        _reuse     => 0,           # reuse existing namespace only
         _autolock  => 1,           # I/O locking by default
         _swap      => 0,           # swap file handle
         _ns        => 0,           # namespace handle
@@ -104,7 +104,7 @@ sub new
 
     croak "Namespace must be defined!" if !defined $_[1];
     
-    my $allowed_parameters = "namespace|size|swapfile|nocreate|autolock|timeout";
+    my $allowed_parameters = "namespace|size|swapfile|reuse|autolock|timeout";
 
     if (ref $_[1] eq 'HASH') {
         # Parameters passed in as HASHREF
@@ -123,14 +123,14 @@ sub new
         }
     } else {
         # Parameters passed in as normal
-        (undef, $self->{_namespace}, $self->{_size}, $self->{_swapfile}, $self->{_nocreate})
+        (undef, $self->{_namespace}, $self->{_size}, $self->{_swapfile}, $self->{_reuse})
             = @_;
     }
 
     croak "Namespace must be defined!" if !$self->{_namespace};
 
     # use or open or create namespace
-    if ($self->{_nocreate}) {
+    if ($self->{_reuse}) {
         $self->{_ns} = UseNamespace($self->{_namespace}) or return undef;
     } else {
         ($self->{_swap}, $self->{_ns}) =
@@ -239,15 +239,13 @@ sub write_iv
  use Win32::MMF;
 
  # --- in process 1 ---
- my $ns1 = Win32::MMF->new ( -namespace => "MyData1" );
+ my $ns1 = Win32::MMF->new ( -namespace => "My.Var1" );
 
- $ns1->lock();
  $ns1->write($data);
- $ns1->unlock();
 
  # --- in process 2 ---
- my $ns2 = Win32::MMF->new ( -namespace => "MyData1",
-                             -nocreate  => 1 )
+ my $ns2 = Win32::MMF->new ( -namespace => "My.Var1",
+                             -reuse     => 1 )
          or die "namespace not exist";
 
  $data = $ns2->read();
@@ -260,14 +258,14 @@ for shared memory support under Windows. The core of the module
 is written in XS and is currently supported only under Windows
 NT/2000/XP.
 
-The current version 0.03 of B<Win32::IPC> is available on CPAN at:
+The current version 0.04 of Win32::MMF is available on CPAN at:
 
   http://search.cpan.org/search?query=Win32::MMF
 
 
 =head1 DESCRIPTION
 
-=head2 PROGRAMMING STYLE
+=head2 Programming Style
 
 This module provides two types of interfaces - an object-oriented
 and a functional interface. The default access method is via objects.
@@ -308,158 +306,292 @@ result in object-oriented style:
                              -size=>1000 )
        or die "Can not create shared namespace";
 
-Note that there is no need to explicitly unmap the view and close
-the swap file in object-oriented mode, the view, namespace and
-swap file handles are automatically closed-off and disposed of when
-the object falls out of scope.
+Note that there is no need to explicitly unmap the view, close the
+namespace and close the swap file in object-oriented mode, the view,
+namespace and swap file handles are automatically closed-off and
+disposed of when the Win32::MMF object falls out of scope.
 
 
-=head2 CREATING A NEW NAMESPACE
+=head1 REFERENCE
 
-   The parameter names are case insensitive. For example, -swapfile,
-   -Swapfile and -SwapFile are equivalent. 0 or undef is returned if
-   the constructor fails.
+=head2 Memory Mapped File (MMF) Under Windows
 
-   # named parameters
-   $ns = Win32::MMF->new(
+Under Windows, code and data are both repesented by pages of memory
+backed by files on disk - code by executable image an data by system
+pagefile (swapfile). These are called memory mapped files. Memory
+mapped files can be used to provide a mechanism for shared memory
+between processes. Different processes are able to share data backed
+by the same swapfile, whether it's the system pagefile or a
+user-defined swapfile.
+
+Windows has a tight security system that prevents processes from
+directly sharing information among each other, but mapped memory files
+provide a mechanism that works with the Windows security system - by
+using a name that all processes use to open the swapfile.
+
+A shared section of the swapfile is translated into pages of memory
+that are addressable by more than one process, Windows uses a system
+resource called a prototype page table entry (PPTE) to enable more
+than one process to address the same physical page of memory, thus
+multiple process can share the same data without violating the Windows
+system security.
+
+In short, MMF's provide shared memory under Windows.
+
+
+=head2 What is a Namespace?
+
+In Win32::MMF a namespace represents shared memory identified by a
+unique name. The namespace must be unique system wide. A suggested
+convention to follow is <[APPID].[VARID]>.
+
+Example: 'MyApp.SharedMem1'.
+
+
+=head2 Creating a Namespace Object
+
+There are three ways to pass parameters into the Win32::MMF
+object constructor: named parameters, a hashref of parameters
+or a list of parameters.
+
+=over 4
+
+=item Using Named Parameters
+
+ $ns = Win32::MMF->new(
               -swapfile => $swapfilename,
               -namespace => $namespace_id,
               -size => 1024,
-              -nocreate => 0,
+              -reuse => 0,
               -autolock => 1,
-              -timeout => 10,
-         );
+              -timeout => 10 );
 
-   # hashref of parameters
-   $ns = Win32::MMF->new(
-            { swapfile => $swapfilename,
+The parameter names begin with '-' and are case
+insensitive. For example, -swapfile, -Swapfile
+and -SwapFile are equivalent.
+
+=item Passing Parameters in a Hashref
+
+ $ns = Win32::MMF->new({
+              swapfile => $swapfilename,
               namespace => $namespace_id,
               size => 1024,
-              nocreate => 0 }
-         );
+              reuse => 0 });
 
-   # list of parameters
-   $ns = Win32::MMF->new($namespace_id, 1024, $swapfile, 0);
+The parameter names do not begin with '-' and
+are case insensitive. This mode is good for working
+with external configuration files.
+
+=item Passing Parameters in a List
+
+ $ns = Win32::MMF->new(
+              $namespace_id,
+              $size,
+              $swapfile,
+              $reuse_flag);
+
+The I<$namespace_id> parameter is mandatory, other
+parameters are optional.
+
+=item Input Parameters
+
+=over 4
 
 =item -swapfile
 
-   Specify the name of the swap file. if it is omitted or undef
-   then the system swap file will be used.
+Specify the name of the memory mapped file (swap file).
+if it is omitted or undef then the system swap file will
+be used.
 
 =item -namespace
 
-   A unique string value that identifies a namespace in the
-   memory mapped file. This option is mandatory.
+A string that uniquely identifies a block of shared memory.
+The namespace must be unique system wide. A suggested
+convention to follow is <[APPID].[VARID]>. This option is
+mandatory.
 
 =item -size
 
-   Specify the size of the namespace in bytes.
+Specify the size of the memory mapped file in bytes.
 
-=item -nocreate
+=item -reuse
 
-   Do not create a new swap file if the swap file does not
-   exist, return undef instead. Check if the namespace has
-   already been declared by another process, and use the
-   existing namespace instead.
-   
+This option tells the constructor to check if the namespace
+has already been declared by another process, and use the
+existing namespace instead. It gurrantees that a namespace
+is not created if it does not exist.
+
 =item -autolock
 
-   Automatic read/write locking, turned on by default.
+Automatic read/write locking, turned on by default.
 
 =item -timeout
 
-   Specify the number of seconds to wait before timing out
-   the lock. This value is set to 10 seconds by default. Set
-   timeout to 0 to wait forever.
+Specify the number of seconds to wait before timing out
+the lock. This value is set to 10 seconds by default. Set
+timeout to 0 to wait forever.
+
+=back
+
+=back
 
 
-=head2 LOCKING A NAMESPACE EXPLICITLY
+=head2 Lock a Namespace Object (for Read/Write Access)
 
-   $ns->lock($timeout);
+All read and write accesses to a namespace are locked
+by default. However if auto-locking is turned off, a
+namespace can be explicitly locked with the B<lock> method.
+
+$ns->lock($timeout);
+
+=over 4
+
+=item Input Parameters
+
+=over 4
 
 =item $timeout
 
-   Number of seconds before the lock attempt fails.
+Number of seconds before the lock attempt fails.
+
+=back
+
+=item Return Values
+
+ undef    Namespace error
+ 0        Time out waiting for lock
+ 1        Success
+
+=back
 
 
-=head2 UNLOCKING A NAMESPACE EXPLICITLY
+=head2 Unlock A Namespace Object
 
-   $ns->unlock();
+$ns->unlock();
 
 
-=head2 WRITING TO A NAMESPACE
+=head2 Accessing a Namespace
 
-   $ns->write($data);
-   $ns->write_iv(1000);
-   
-=head2 READING FROM A NAMESPACE
+All read and write accesses to a namespace are locked
+by default to preserve data integrity across processes.
+The excellent L<Data::Serializer> module is used for
+data serialization.
 
-   $data = $ns->read();
-   $i    = $ns->read_iv();
+=over 4
+
+=item $ns->write($data, ...);
+
+Serialize all given data and then write the serialized
+data into namespace. Please refer to the L<Data::Serializer>
+documentation on how to serialize and retrieve data.
+
+A string is written into the shared memory in Pascal
+string format, ie., <length><string data>. Special care
+is taken to preserve the string during transportation
+so that the exact string including '\0' characters will
+be retrieved back from the shared memory.
+
+=item $ns->write_iv($i);
+
+Writes an integer value into the shared memory. This can
+be used to clear the length of a string (and thus clearing
+the shared memory).
+
+=item $data = $ns->read();
+
+Retrieves the serialized data string from the shared memory,
+and deserializes back into perl variable(s). Please refer to
+the L<Data::Serializer> documentation on how to serialize and
+retrieve data.
+
+=item $i = $ns->read_iv();
+
+Reads an integer value from the shared memory. This can
+be used to test the shared memory for availability of data,
+for example.
+
+=back
+
+=back
 
 
 =head1 EXAMPLE
 
-   use strict;
-   use warnings;
-   use Win32::MMF;
-   use Data::Dumper;
-   use CGI;   # for testing of inter-process object transportation
+ use strict;
+ use warnings;
+ use Win32::MMF;
+ use Data::Dumper;
+ use CGI;   # for testing of inter-process object transportation
 
-   # fork a process
-   defined(my $pid = fork()) or die "Can not fork a child process!";
+ # fork a process
+ defined(my $pid = fork()) or die "Can not fork a child process!";
 
-   if ($pid) {
-       my $ns1 = Win32::MMF->new ( -namespace => "My.data1" );
-       my $ns2 = Win32::MMF->new ( -namespace => "My.data2" );
+ if ($pid) {
+     my $ns1 = Win32::MMF->new ( -namespace => "My.data1" );
+     my $ns2 = Win32::MMF->new ( -namespace => "My.data2" );
 
-       my $cgi = new CGI;
-       my $data = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
+     my $cgi = new CGI;
+     my $data = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
 
-       $ns1->write($data);
-       $ns2->write($cgi);
+     $ns1->write($data);
+     $ns2->write($cgi);
 
-       print "--- Sent ---\n";
-       print Dumper($data), "\n";
-       print Dumper($cgi), "\n";
+     print "--- Sent ---\n";
+     print Dumper($data), "\n";
+     print Dumper($cgi), "\n";
 
-       sleep(1);
+     sleep(1);
 
-   } else {
+ } else {
+     sleep(1);  # child process wait for parent to initialize
 
-       # in child
-       sleep(1);
-       my $ns1 = Win32::MMF->new ( -namespace => "My.data1",
-                                   -nocreate => 1 )
-               or die "Namespace does not exist!";
+     my $ns1 = Win32::MMF->new ( -namespace => "My.data1",
+                                 -reuse => 1 )
+             or die "Namespace does not exist!";
 
-       my $ns2 = Win32::MMF->new ( -namespace => "My.data2",
-                                   -nocreate => 1 )
-               or die "Namespace does not exist!";
+     my $ns2 = Win32::MMF->new ( -namespace => "My.data2",
+                                 -reuse => 1 )
+             or die "Namespace does not exist!";
 
-       my $data = $ns1->read();
-       my $cgi = $ns2->read();
+     my $data = $ns1->read();
+     my $cgi = $ns2->read();
 
-       print "--- Received ---\n";
-       print Dumper($data), "\n";
-       print Dumper($cgi), "\n";
+     print "--- Received ---\n";
+     print Dumper($data), "\n";
+     print Dumper($cgi), "\n";
 
-       print "--- Use Received Object ---\n";
-       # use the object from another process :-)
-       print $cgi->header(),
-             $cgi->start_html(), "\n",
-             $cgi->end_html(), "\n";
-}
+     print "--- Use Received Object ---\n";
+     # use the object from another process :-)
+     print $cgi->header(),
+           $cgi->start_html(), "\n",
+           $cgi->end_html(), "\n";
+ }
 
+
+=head1 SEE ALSO
+
+L<Data::Serializer>
 
 =head1 CREDITS
 
-All the credits go to my wife Jenny and son Albert, and I love them forever.
+Credits go to my wife Jenny and son Albert, and I love them forever.
+
+=back
 
 
 =head1 AUTHOR
 
 Roger Lee <roger@cpan.org>
+
+=back
+
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2004 Roger Lee
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
 
 =cut
 

@@ -26,17 +26,15 @@ if ($pid) {
 } else {
 
     # in child
-    sleep(1);
-    my $ns1 = Win32::MMF->new ( -namespace => "My.data1",
-                                -nocreate => 1 )
-            or die "Namespace does not exist!";
+    my ($ns1, $ns2);
 
-    my $ns2 = Win32::MMF->new ( -namespace => "My.data2",
-                                -nocreate => 1 )
-            or die "Namespace does not exist!";
+    do {} while ! ($ns1 = Win32::MMF->new(-namespace => "My.data1", -reuse => 1) );
+    do {} while ! ($ns2 = Win32::MMF->new(-namespace => "My.data2", -reuse => 1) );
 
-    my $data = $ns1->read();
-    my $cgi = $ns2->read();
+    my ($data, $cgi);
+
+    do {} while ! ($data = $ns1->read());
+    do {} while ! ($cgi = $ns2->read());
 
     print "--- Received ---\n";
     print Dumper($data), "\n";
