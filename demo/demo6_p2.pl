@@ -1,9 +1,7 @@
 use strict;
 use warnings;
-use Win32::MMF::Shareable qw/ Debug /;
+use Win32::MMF::Shareable;
 use CGI;
-
-Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
 
 # Process 2
 
@@ -16,10 +14,10 @@ $sig2 = 1;
 
 while (!$sigM) {}
 
-while (@array != 10) {}  # wait for the array to be filled up by proc 1
+while (@array < 10) {}  # wait for the array to be filled up by proc 1
 
 while (@array) {
-    print shift(@array), "\n";
+    print "proc2 - pop [", shift(@array), "]\n";
 }
 
 while (!$cgi) {};       # wait for $cgi to become alive

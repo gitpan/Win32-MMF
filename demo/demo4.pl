@@ -1,13 +1,10 @@
 use strict;
 use warnings;
 use Data::Dumper;
-use Win32::MMF::Shareable qw/Debug/;
-
-# Must initialize namespace before use
-Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
+use Win32::MMF::Shareable;
 
 # Tie variables to shared namespace
-tie my $shared, "Win32::MMF::Shareable", '$shared';
+my $ns = tie my $shared, "Win32::MMF::Shareable", '$shared';
 tie my @shared, "Win32::MMF::Shareable", '@shared';
 tie my %shared, "Win32::MMF::Shareable", '%shared';
 
@@ -27,7 +24,7 @@ for (0..3) {
 # as hash
 %shared = @shared;
 
-Debug();
+$ns->debug();
 
 print Dumper(\@sh2), "\n";
 print Dumper(\%sh2), "\n";

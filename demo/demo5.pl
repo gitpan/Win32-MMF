@@ -4,8 +4,6 @@ use Win32::MMF::Shareable;
 
 # Signaling with tied shared variables
 
-Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
-
 defined(my $pid = fork()) or die "Can not fork a child process!";
 
 if (!$pid) {

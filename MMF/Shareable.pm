@@ -10,23 +10,37 @@ require Exporter;
 require DynaLoader;
 
 our @ISA = qw/ Exporter /;
-our @EXPORT_OK = qw/ Init Debug Namespace /;
-our $VERSION = '0.01';
+our @EXPORT_OK = qw/ Debug Namespace /;
+our $VERSION = '0.02';
 
 # ------------------- Tied Interface -------------------
 
-our $ns = undef;
+our $ns;
 
-sub Init {
-    $ns = Win32::MMF->new (@_) or return undef;
-    $ns->{_autolock} = 0;   # turn off auto-locking
+my $default_settings = {
+    _key => undef,      # only the key is used
+    _type => undef,     # set data type
+    _swapfile => undef, # use system pagefile
+    _namespace => 'shareable',
+    _size => 128 * 1024,    # 128k default size
+    _iterating => '',
+};
+
+sub init {
+    if (!$ns) {
+        $ns = Win32::MMF->new ( -namespace => $default_settings->{_namespace},
+                                -size => $default_settings->{_size},
+                                -swapfile => $default_settings->{_swapfile} )
+                or croak "No shared mem!";
+        $ns->{_autolock} = 0;
+    }
 }
 
-sub Namespace {
+sub ns {
     return $ns
 }
 
-sub Debug {
+sub debug {
     $ns && $ns->debug();
 }
 
@@ -268,7 +282,7 @@ sub PUSH {
     my $self = shift;
 
     $ns->lock();
-    
+
     $self->{_data} = $ns->getvar($self->{_key});
 
     if (!defined $self->{_data}) {
@@ -305,23 +319,12 @@ sub UNTIE {
 
 # ------------------------------------------------------------------------------
 
-END {
-    undef $ns if $ns;
-}
-
 sub _tie {
     my $type  = shift;
     my $class = shift;
 
-    croak "Win32::MMF::Shareable has not been initialized yet!" if !$ns;
-
-    $ns->lock();
-
-    my $self = {
-        _key => undef,      # only the key is used
-        _type => $type,     # set data type
-        _iterating => '',
-    };
+    my $self = { %$default_settings };
+    $self->{_type} = $type;
 
     # allowed parameters are aliases to IPC::Shareable
     my $allowed_parameters = "key";
@@ -346,10 +349,14 @@ sub _tie {
         }
     }
 
-    croak "The tag for the tied variable must be defined!" if !$self->{_key};
+    croak "The label/key for the tied variable must be defined!" if !$self->{_key};
 
+    init( -namespace => $self->{_namespace},
+          -swapfile => $self->{_swapfile},
+          -size => $self->{_size} ) if ! $ns;
+
+    $ns->lock();
     $ns->setvar($self->{_key}, '') if !$ns->findvar($self->{_key});
-    
     $ns->unlock();
 
     bless $self, $class;

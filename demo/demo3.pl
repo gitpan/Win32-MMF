@@ -12,8 +12,7 @@ use CGI;
 defined(my $pid = fork()) or die "Can not fork a child process!";
 
 if ($pid) {
-   my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
-                               -size => 1024 * 1024 );
+   my $ns1 = new Win32::MMF;
 
    my $cgi = new CGI;
    my $hash = {a=>[1,2,3], b=>4, c=>"A\0B\0C\0"};
@@ -40,8 +39,7 @@ if ($pid) {
 
 } else {
 
-   my $ns1 = Win32::MMF->new ( -namespace => "MyMMF",
-                               -size => 1024 * 1024 );
+   my $ns1 = new Win32::MMF;
 
    while (!$ns1->getvar("SIG")) {};
    $ns1->setvar("SIG", '');

@@ -1,15 +1,19 @@
 #ifndef __MMF_H
 #define __MMF_H
 
+typedef struct MMF_MANAGER {
+	int    debug;
+} MMF_MANAGER;
+
 
 /* structure used to hold current MMF information */
 
 typedef struct MMF_DESCRIPTOR {
-    long  m_mmf_size;   // size of the MMF in bytes
-    long  m_var_count;  // number of variables held in the MMF
-    char *m_heap_bot;   // bottom of the heap
-    char *m_heap_top;   // top of the heap
-    char *m_kbrk;
+    long m_mmf_size;    // size of the MMF in bytes
+    long m_var_count;   // number of variables held in the MMF
+    long m_heap_bot;    // offset to the bottom of the heap
+    long m_heap_top;    // offset to the top of the heap
+    long m_kbrk;        // offset to the watermark
 } MMF_DESCRIPTOR;
 
 
@@ -27,10 +31,10 @@ typedef struct MMF_VAR {
 
 typedef struct MMF_MAP
 {
-    unsigned        size;
-    struct MMF_MAP *next;
-    unsigned        magic;
-    unsigned        used;
+    unsigned long   size;
+    unsigned long   next;   // offset to the next block
+    unsigned long   magic;
+    unsigned long   used;
 } MMF_MAP;
 
 

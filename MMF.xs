@@ -28,13 +28,140 @@
 #include <memory.h>
 #include "MMF.h"
 
-#define MY_CXT_KEY "Win32::MMF::_guts" XS_VERSION
+MMF_MANAGER mmf_guts = { 0 };
 
-typedef struct {
-	int    debug;
-} my_cxt_t;
+#define offset_to_ptr(off) ( off == 0 ? NULL : (MMF_MAP *)((char *)mmf + off) )
+#define ptr_to_offset(ptr) ( (char *)ptr - (char *)mmf )
 
-START_MY_CXT
+
+static long __nbrk(MMF_DESCRIPTOR *mmf, unsigned *delta)
+{
+    long new_brk, old_brk;
+    // printf("NBRK\n");
+
+    if (mmf->m_heap_bot == 0) {		// heap doesn't exist yet
+		mmf->m_heap_bot = mmf->m_kbrk = sizeof(MMF_DESCRIPTOR);
+	}
+
+	new_brk = mmf->m_kbrk + (*delta);
+	if(new_brk < mmf->m_heap_bot) { 	// too low: return NULL
+	    printf("*** __NBRK(): Too low\n");
+		return 0;
+	}
+
+	if(new_brk >= mmf->m_heap_top) {	// too high: return NULL
+	    printf("*** __NBRK(%ld): Too high (%ld)\n", new_brk, mmf->m_heap_top);
+		return 0;
+	}
+
+	old_brk = mmf->m_kbrk;				// success
+	mmf->m_kbrk = new_brk;
+
+	return(old_brk);
+}
+
+// Allocate required memory + extra for memory management
+// returns offset to the allocated block of memory
+static long __malloc(MMF_DESCRIPTOR *mmf, unsigned long size)
+{
+	MMF_MAP *map, *m, *n;
+	unsigned total_size;
+	int delta;
+	long newbrk;
+
+    // printf("MALLOC\n");
+
+    map = (MMF_MAP *) (mmf + 1);
+    mmf->m_heap_top = mmf->m_mmf_size - mmf->m_var_count * sizeof(MMF_VAR);
+
+	if (size == 0) {
+        // printf("*** Zero-length malloc ignored in Malloc()\n");
+		return NULL;
+	}
+
+    total_size = size + sizeof(MMF_MAP); // total size required
+
+	// search heap for free block (FIRST FIT)
+	m = offset_to_ptr(mmf->m_heap_bot);  // point to heap bottom
+	if (m != NULL)
+	{
+		if(m->magic != MALLOC_MAGIC)
+		{
+			printf("*** MMF is corrupt in Malloc()\n");
+			return NULL;
+		}
+
+		for(; m->next != 0; m = offset_to_ptr(m->next))
+		{
+			// printf("*** print total=%ld size=%ld\n", total_size, m->size);
+			if(m->used) continue;
+
+			if((unsigned)size == m->size)		   // size == m->size is a perfect fit
+				m->used = 1;
+			else
+			{	// otherwise, we need an extra sizeof(malloc_t) bytes for the header
+				// of a second, free block
+                if(total_size > m->size) continue;
+				n = (MMF_MAP *)((char *)m + total_size); // create a new, smaller free block after this one
+				n->size = m->size - total_size;
+				n->next = m->next;
+				n->magic = MALLOC_MAGIC;
+				n->used = 0;	 // reduce the size of this block and mark it used
+				m->size = size;
+				m->next = ptr_to_offset(n);  // get offset to next block
+				m->used = 1;
+			}
+			return ptr_to_offset(m) + sizeof(MMF_MAP);
+		}
+
+        if (size == m->size && !m->used) {
+            m->used = 1;
+            return ptr_to_offset(m) + sizeof(MMF_MAP);
+        } else
+
+        if (total_size < m->size && !m->used) {
+		    n = (MMF_MAP *)((char *)m + total_size); // create a new, smaller free block after this one
+			n->size = m->size - total_size;
+			n->next = m->next;
+			n->magic = MALLOC_MAGIC;
+			n->used = 0;	 // reduce the size of this block and mark it used
+			m->size = size;
+			m->next = ptr_to_offset(n);
+			m->used = 1;
+			return ptr_to_offset(m) + sizeof(MMF_MAP);
+		}
+	}
+
+	delta = total_size;
+
+    newbrk = __nbrk(mmf, &delta);
+    if (newbrk == 0) {
+        printf("*** __MALLOC: No NBRK\n");
+		return 0;
+	}
+
+	n = offset_to_ptr(newbrk);
+	if(m != NULL) m->next = newbrk;
+	n->size = size;
+	n->magic = MALLOC_MAGIC;
+	n->used = 1;
+
+	if((int)total_size == delta)
+		n->next = 0;
+	else
+	{
+		/* it returned more than we wanted (it will never return less):
+		   create a new, free block */
+		m = (MMF_MAP *)((char *)n + total_size);
+		m->size = delta - total_size - sizeof(MMF_MAP);
+		m->next = 0;
+		m->magic = MALLOC_MAGIC;
+		m->used = 0;
+		n->next = ptr_to_offset(m);
+	}
+
+    return ptr_to_offset(n) + sizeof(MMF_MAP);
+}
 
 
 static void __dumpheap(MMF_DESCRIPTOR *mmf)
@@ -45,21 +172,26 @@ static void __dumpheap(MMF_DESCRIPTOR *mmf)
 	unsigned bytes_used = 0, bytes_free = 0;
 	int i;
 
+	// printf("DUMP\n");
+
+
 	printf("=== MMF DESCRIPTOR (MMFD) =====================\n"
 	       "| MMF size: %ld bytes\n"
            "| No. of variables held in MMF: %ld\n"
-           "| MMF Heap: bottom=%p\n"
-           "|           top=%p\n"
-           "|           watermark=%p\n",
+           "| MMF Heap: top       %ld\n"
+           "|           watermark %ld\n"
+           "|           bottom    %ld\n",
            mmf->m_mmf_size,
            mmf->m_var_count,
-           mmf->m_heap_bot,
            mmf->m_heap_top,
-           mmf->m_kbrk);
+           mmf->m_kbrk,
+           mmf->m_heap_bot);
     printf("+== HEAP STRUCTURE ============================\n");
-    for(m = (MMF_MAP*)mmf->m_heap_bot; m != NULL; m = m->next)
+    for(m = offset_to_ptr(mmf->m_heap_bot); m != NULL; m = offset_to_ptr(m->next))
 	{
-		printf("| blk %5p: %6lu bytes %s\n", (char*)m+sizeof(MMF_MAP), m->size, m->used ? "used" : "free");
+		printf("| blk %8ld: %6lu bytes %s\n",
+                ptr_to_offset(m) + sizeof(MMF_MAP),
+                m->size, m->used ? "used" : "free");
 		if(m->used) {
 			blks_used++;
 			bytes_used += m->size;
@@ -79,179 +211,60 @@ static void __dumpheap(MMF_DESCRIPTOR *mmf)
 
     for (i=0;i<mmf->m_var_count;i++) {
         v = (MMF_VAR*)((char *)mmf + mmf->m_mmf_size - (1+i)*sizeof(MMF_VAR));
-        printf("| %-20s %-12p %-6d %c\n",
-               v->v_name, (char*)v->v_data, v->v_size,
+        printf("| %-20s %-12ld %-6d %c\n",
+               v->v_name, v->v_data, v->v_size,
                v->v_type ? 'C' : 'S');
     }
 	printf("=== END OF REPORT =============================\n\n");
 }
 
 
-static void *__nbrk(MMF_DESCRIPTOR *mmf, unsigned *delta)
-{
-    char *new_brk, *old_brk;
-
-    if (mmf->m_heap_bot == NULL) {		// heap doesn't exist yet
-		mmf->m_heap_bot = mmf->m_kbrk = (char *) (mmf + 1);
-	}
-
-	new_brk = mmf->m_kbrk + (*delta);
-	if(new_brk < mmf->m_heap_bot) { 	// too low: return NULL
-	    // printf("*** __NBRK(): Too low\n");
-		return NULL;
-	}
-
-	if(new_brk >= mmf->m_heap_top) {	// too high: return NULL
-	    // printf("*** __NBRK(%p): Too high (%p)\n", new_brk, mmf->m_heap_top);
-		return NULL;
-	}
-
-	old_brk = mmf->m_kbrk;				// success
-	mmf->m_kbrk = new_brk;
-
-	return(old_brk);
-}
-
-
-static void *__malloc(MMF_DESCRIPTOR *mmf, unsigned size)
-{
-	MMF_MAP *map, *m, *n;
-	unsigned total_size;
-	int delta;
-
-	map = (MMF_MAP *) (mmf + 1);
-	mmf->m_heap_top = (char *) mmf + mmf->m_mmf_size - mmf->m_var_count * sizeof(MMF_VAR);
-
-	if (size == 0) {
-        // printf("*** Zero-length malloc ignored in Malloc()\n");
-		return NULL;
-	}
-
-    total_size = size + sizeof(MMF_MAP); // total size required
-
-	// search heap for free block (FIRST FIT)
-	m = (MMF_MAP *)mmf->m_heap_bot;
-	if (m != NULL)
-	{
-		if(m->magic != MALLOC_MAGIC)
-		{
-			printf("*** MMF is corrupt in Malloc()\n");
-			return NULL;
-		}
-
-		for(; m->next != NULL; m = m->next)
-		{
-			// printf("*** print total=%ld size=%ld\n", total_size, m->size);
-			if(m->used) continue;
-
-			if((unsigned)size == m->size)		   // size == m->size is a perfect fit
-				m->used = 1;
-			else
-			{	// otherwise, we need an extra sizeof(malloc_t) bytes for the header
-				// of a second, free block
-                if(total_size > m->size) continue;
-				n = (MMF_MAP *)((char *)m + total_size); // create a new, smaller free block after this one
-				n->size = m->size - total_size;
-				n->next = m->next;
-				n->magic = MALLOC_MAGIC;
-				n->used = 0;	 // reduce the size of this block and mark it used
-				m->size = size;
-				m->next = n;
-				m->used = 1;
-			}
-			return (void *)((char *)m + sizeof(MMF_MAP));
-		}
-
-        if ((unsigned)size == m->size && !m->used) {
-            m->used = 1;
-            return (void *)((char *)m + sizeof(MMF_MAP));
-        } else
-
-        if (total_size < m->size && !m->used) {
-		    n = (MMF_MAP *)((char *)m + total_size); // create a new, smaller free block after this one
-			n->size = m->size - total_size;
-			n->next = m->next;
-			n->magic = MALLOC_MAGIC;
-			n->used = 0;	 // reduce the size of this block and mark it used
-			m->size = size;
-			m->next = n;
-			m->used = 1;
-			return (void *)((char *)m + sizeof(MMF_MAP));
-		}
-	}
-
-	delta = total_size;
-    n = (MMF_MAP *)__nbrk(mmf, &delta);
-	if (n == NULL) {
-        printf("*** __MALLOC: No NBRK\n");
-		return NULL;
-	}
-	if(m != NULL) m->next = n;
-	n->size = size;
-	n->magic = MALLOC_MAGIC;
-	n->used = 1;
-
-	if((int)total_size == delta)
-		n->next = NULL;
-	else
-	{
-		/* it returned more than we wanted (it will never return less):
-		   create a new, free block */
-		m = (MMF_MAP *)((char *)n + total_size);
-		m->size = delta - total_size - sizeof(MMF_MAP);
-		m->next = NULL;
-		m->magic = MALLOC_MAGIC;
-		m->used = 0;
-		n->next = m;
-	}
-
-	return (void *) ((char *)n + sizeof(MMF_MAP));
-}
-
-
-static void __free(MMF_DESCRIPTOR *mmf, void *szMEMORY)
+static void __free(MMF_DESCRIPTOR *mmf, long offset)
 {
 	MMF_MAP *m, *n;
+
+	// printf("FREE\n");
+
 
     // __dumpheap(mmf);
 
 	// get address of header
-	m = (MMF_MAP*)((char *) szMEMORY - sizeof(MMF_MAP));
+	m = (MMF_MAP*)((char *)mmf + offset - sizeof(MMF_MAP));
 
 	if(m->magic != MALLOC_MAGIC)
 	{
-		// printf("*** Attempt to Free() block at 0x%p with bad magic value\n", (char *)szMEMORY);
+		printf("*** Attempt to Free() block at %ld with bad magic value\n", offset);
 		return;
 	}
 
 	// find this block in the heap
-	n = (MMF_MAP *)mmf->m_heap_bot;
+	n = offset_to_ptr(mmf->m_heap_bot);
 	if(n->magic != MALLOC_MAGIC)
 	{
-		// printf("*** Shared Memory is corrupt in Free()\n");
+		printf("*** Shared Memory is corrupt in Free()\n");
 		return;
 	}
-	for(; n != NULL; n = n->next)
+	for(; n != NULL; n = offset_to_ptr(n->next))
 	{
 		if(n == m) break;
 	}
 	if(n == NULL)
 	{
-		// printf("*** Attempt to Free() block at 0x%p that is not in the shared memory\n", (char *)szMEMORY);
+		printf("*** Attempt to Free() block at %ld that is not in the shared memory\n", offset);
 		return;
 	}
 	m->used = 0;
 
 	// coalesce adjacent free blocks
 	// Hard to spell, hard to do
-	for(m = (MMF_MAP *)mmf->m_heap_bot; m != NULL; m = m->next)
+	for(m = offset_to_ptr(mmf->m_heap_bot); m != NULL; m = offset_to_ptr(m->next))
 	{
-		while(!m->used && m->next != NULL && !m->next->used)
+		while(!m->used && m->next != NULL && !offset_to_ptr(m->next)->used)
 		{
 			// resize this block
-			m->size += sizeof(MMF_MAP) + m->next->size;
+			m->size += sizeof(MMF_MAP) + offset_to_ptr(m->next)->size;
 			// merge with next block
-			m->next = m->next->next;
+			m->next = offset_to_ptr(m->next)->next;
 		}
 	}
 
@@ -259,16 +272,19 @@ static void __free(MMF_DESCRIPTOR *mmf, void *szMEMORY)
 }
 
 
-static void *__realloc(MMF_DESCRIPTOR *mmf, void *mem, unsigned size)
+static long __realloc(MMF_DESCRIPTOR *mmf, long mem, unsigned size)
 {
 	MMF_MAP *m;
-	void *new_blk;
+	long new_blk;
 	unsigned min;
 
-	if ((long)size == 0)  // free block
+	// printf("REALLOC\n");
+
+
+	if (size == 0)  // free block
 	{
-		if(mem != NULL) __free( mmf, mem );
-		return NULL;
+		if(mem != 0) __free( mmf, mem );
+		return 0;
 	} else {
 		// allocate new block
 		new_blk = __malloc( mmf, size );
@@ -277,9 +293,9 @@ static void *__realloc(MMF_DESCRIPTOR *mmf, void *mem, unsigned size)
 		}
 
 		// if allocation OK, and if old block exists, copy old block to new
-		if(new_blk != NULL && mem != NULL)
+		if(new_blk != 0 && mem != 0)
 		{
-			m = (MMF_MAP *)((char *)mem - sizeof(MMF_MAP));
+			m = offset_to_ptr(mem - sizeof(MMF_MAP));
 			if(m->magic != MALLOC_MAGIC)
 			{
 				printf("*** Attempt to Realloc() block at 0x%p with bad magic value\n", (char *)mem);
@@ -287,9 +303,9 @@ static void *__realloc(MMF_DESCRIPTOR *mmf, void *mem, unsigned size)
 			}
 			// copy minimum of old and new block sizes
             min = (unsigned)size > m->size ? m->size : size;
-			memcpy(new_blk, (char *)mem, min);
-			m = (MMF_MAP *)((char *)new_blk - sizeof(MMF_MAP));
-			m->size = size;
+			memcpy((char *)offset_to_ptr(new_blk), (char *)offset_to_ptr(mem), min);
+			m = offset_to_ptr(new_blk - sizeof(MMF_MAP));
+            m->size = size;
 			__free( mmf, mem );
 		}
 	}
@@ -352,7 +368,7 @@ static MMF_VAR *__createvar(MMF_DESCRIPTOR *mmf, char *varname)
 		var->v_data = 0;
 
 		if (mmf->m_heap_top != NULL) {
-			mmf->m_heap_top = (char *) var;
+			mmf->m_heap_top = ptr_to_offset(var);
 		}
 		return(var);
 	}
@@ -372,10 +388,10 @@ static int __setvar(MMF_DESCRIPTOR *mmf, char *varname, long type, char *value, 
 
 	// allocate memory to hold the variable
 	if (var->v_data == 0) {
-		var->v_data = (long) __malloc(mmf, size);
+		var->v_data = __malloc(mmf, size);
 	} else {
         if (var->v_size != size) {
-	       var->v_data = (long) __realloc(mmf, (void *)var->v_data, (unsigned)size);
+	       var->v_data = __realloc(mmf, var->v_data, (unsigned)size);
 	    }
     }
 
@@ -385,20 +401,20 @@ static int __setvar(MMF_DESCRIPTOR *mmf, char *varname, long type, char *value, 
 	if (!var->v_data) return(0);
 
     // transfer data into the allocated memory
-    memcpy((char *)var->v_data, value, size);
+    memcpy((char *)offset_to_ptr(var->v_data), value, size);
 
 	return(1);
 }
 
 
-static char *__getvar(MMF_DESCRIPTOR *mmf, char *varname, long *size)
+static long __getvar(MMF_DESCRIPTOR *mmf, char *varname, long *size)
 {
 	MMF_VAR *var;
 	var = __findvar(mmf, varname);
-	if (!var) return NULL;
-	if (!var->v_data) return NULL;
+	if (!var) return 0;
+	if (!var->v_data) return 0;
 	*size = var->v_size;
-	return (char *)var->v_data;
+	return var->v_data;
 }
 
 
@@ -422,13 +438,13 @@ static int __deletevar(MMF_DESCRIPTOR *mmf, char *varname)
     if (!var) return(0);
 
     if (var->v_data != 0) {
-        __free(mmf, (void *)var->v_data);
+        __free(mmf, var->v_data);
     }
 
     // point to the beginning of the var table
     m = (MMF_VAR*)((char *)mmf + mmf->m_mmf_size - mmf->m_var_count * sizeof(MMF_VAR));
 
-    if (mmf->m_heap_top != NULL) mmf->m_heap_top = (char *)(m + 1);
+    if (mmf->m_heap_top != 0) mmf->m_heap_top = ptr_to_offset((char *)m) + sizeof(MMF_VAR);
     for (n=var;n!=m;n--) {
         *n = *(n - 1);
     }
@@ -442,26 +458,21 @@ MODULE = Win32::MMF 	PACKAGE = Win32::MMF
 
 BOOT:
 	{
-		MY_CXT_INIT;
-		MY_CXT.debug = 0;
+		mmf_guts.debug = 0;
 	}
 
 
 void SetDebugMode(IV mode)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
-	MY_CXT.debug = mode;
+	mmf_guts.debug = mode;
 }
 
 
 IV GetDebugMode(void)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
-	RETVAL = MY_CXT.debug;
+	RETVAL = mmf_guts.debug;
 }
 OUTPUT:
 	RETVAL
@@ -469,12 +480,11 @@ OUTPUT:
 
 IV CreateFile(char *szMapFileName)
 PREINIT:
-	dMY_CXT;
 	HANDLE hFile = NULL;
 CODE:
 {
 	if (strlen(szMapFileName) > 0) {
-		if (MY_CXT.debug) printf("CreateFile: filename=%s\n", szMapFileName);
+		if (mmf_guts.debug) printf("CreateFile: filename=%s\n", szMapFileName);
 
 		hFile = CreateFile(
 					szMapFileName,
@@ -487,7 +497,7 @@ CODE:
 
 		if (hFile == (HANDLE)INVALID_HANDLE_VALUE)
 		{
-			if (MY_CXT.debug) printf("CreateFile: Failed to create %s\n", szMapFileName);
+			if (mmf_guts.debug) printf("CreateFile: Failed to create %s\n", szMapFileName);
 
 			XSRETURN_UNDEF;
 		}
@@ -501,17 +511,16 @@ OUTPUT:
 
 IV OpenFile(char *szMapFileName)
 PREINIT:
-	dMY_CXT;
 	HANDLE hFile = NULL;
 	OFSTRUCT   of;
 CODE:
 {
 	if (strlen(szMapFileName) > 0) {
-		if (MY_CXT.debug) printf("OpenFile: filename=%s\n", szMapFileName);
+		if (mmf_guts.debug) printf("OpenFile: filename=%s\n", szMapFileName);
 
 		if ((hFile = (HANDLE) OpenFile (szMapFileName, &of, OF_READWRITE)) == (HANDLE)HFILE_ERROR)
 		{
-			if (MY_CXT.debug)
+			if (mmf_guts.debug)
 				printf("OpenFile: Failed to open %s\n", szMapFileName);
 
 			XSRETURN_UNDEF;
@@ -526,7 +535,6 @@ OUTPUT:
 
 IV CreateFileMapping(IV szMapFileHandle, IV szMapFileSize, char *szNameSpace)
 PREINIT:
-	dMY_CXT;
 	HANDLE hmmFile = NULL;
 	HANDLE hFile = (HANDLE)0xFFFFFFFF;
 CODE:
@@ -535,7 +543,7 @@ CODE:
 		hFile = (HANDLE) szMapFileHandle;
 	}
 
-	if (MY_CXT.debug) {
+	if (mmf_guts.debug) {
 		printf( "CreateFileMapping: %s (size=%ld, namespace=%s)\n",
 				szMapFileHandle ? "ext-swap" : "system-swap",
 				szMapFileSize,
@@ -549,7 +557,7 @@ CODE:
 							   szMapFileSize,
 							   szNameSpace);
 
-	if (!hmmFile && MY_CXT.debug) {
+	if (!hmmFile && mmf_guts.debug) {
 		printf("CreateFileMapping: Error creating file mapping\n");
 		XSRETURN_UNDEF;
 	}
@@ -562,14 +570,13 @@ OUTPUT:
 
 IV OpenFileMapping(char *szNameSpace)
 PREINIT:
-	dMY_CXT;
 	HANDLE hFile = NULL;
 	char *ns = NULL;		// unique namespace / object-id
 CODE:
 {
 	if (strlen(szNameSpace) > 0)
 	{
-		if (MY_CXT.debug) {
+		if (mmf_guts.debug) {
 			printf("OpenFileMapping: namespace=%s\n", szNameSpace);
 		}
 
@@ -579,7 +586,7 @@ CODE:
 
 		if (hFile == (HANDLE)INVALID_HANDLE_VALUE)
 		{
-			if (MY_CXT.debug)
+			if (mmf_guts.debug)
 				printf("OpenFileMapping: invalid object/namespace %s\n", szNameSpace);
 
 			XSRETURN_UNDEF;
@@ -595,7 +602,6 @@ OUTPUT:
 
 IV MapViewOfFile(IV szMemoryMapFileHandle, IV offset, IV size)
 PREINIT:
-	dMY_CXT;
 	LPVOID mem;
 CODE:
 {
@@ -617,7 +623,6 @@ OUTPUT:
 
 void UnmapViewOfFile(IV szView)
 PREINIT:
-	dMY_CXT;
 	LPVOID mem;
 CODE:
 {
@@ -629,8 +634,6 @@ CODE:
 
 
 void CloseHandle(IV szHandle)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
 	if (szHandle) {
@@ -641,7 +644,6 @@ CODE:
 
 IV CreateSemaphore(IV initCount, IV maxCount, char *szNameSpace)
 PREINIT:
-	dMY_CXT;
 	HANDLE hSemaphore;
 CODE:
 {
@@ -668,7 +670,6 @@ OUTPUT:
 
 IV WaitForSingleObject(IV hSemaphore, IV timeout)
 PREINIT:
-	dMY_CXT;
 	HANDLE h;
 	long t;
 	long result;
@@ -690,8 +691,6 @@ OUTPUT:
 
 
 IV ReleaseSemaphore(IV hSemaphore, IV increment)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
 	if (!hSemaphore || (increment <= 0) )
@@ -716,7 +715,6 @@ OUTPUT:
 
 void InitMMF(IV szMMF, long size)
 PREINIT:
-	dMY_CXT;
 	MMF_DESCRIPTOR *mmf;			// Initialize MMF
 CODE:
 {
@@ -724,44 +722,38 @@ CODE:
 
 	mmf->m_mmf_size = size;
 	mmf->m_var_count = 0;
-	mmf->m_heap_bot = NULL;
-	mmf->m_heap_top = NULL;
-	mmf->m_kbrk = NULL;
+	mmf->m_heap_bot = 0;
+	mmf->m_heap_top = 0;
+	mmf->m_kbrk = 0;
 
-	if (MY_CXT.debug) {
-		printf("InitMMF: Address=%p Size=%ld\n", mmf, size);
+	if (mmf_guts.debug) {
+		printf("InitMMF: Base Address=%p Size=%ld\n", mmf, size);
 		__dumpheap(mmf);
 	}
 }
 
 
 IV Malloc(IV szMMF, IV size)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
-	RETVAL = (long) __malloc( (MMF_DESCRIPTOR*) szMMF, (unsigned) size );
+	RETVAL = __malloc( (MMF_DESCRIPTOR*) szMMF, (unsigned) size );
 }
 OUTPUT:
 	RETVAL
 
 
 void Free(IV szMMF, IV szMEMORY)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
-	__free( (MMF_DESCRIPTOR*) szMMF, (void *) szMEMORY );
+	__free( (MMF_DESCRIPTOR*) szMMF, szMEMORY );
 }
 
 
 
 IV Realloc(IV szMMF, IV szMEMORY, IV size)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
-	RETVAL = (long) __realloc( (MMF_DESCRIPTOR *)szMMF, (void *)szMEMORY, (unsigned)size );
+	RETVAL = (long) __realloc( (MMF_DESCRIPTOR *)szMMF, szMEMORY, (unsigned)size );
 }
 OUTPUT:
 	RETVAL
@@ -799,8 +791,6 @@ OUTPUT:
 
 
 IV SetVar(IV szMMF, char *varname, IV type, char *value, long size)
-PREINIT:
-	dMY_CXT;
 CODE:
 {
 	RETVAL = __setvar( (MMF_DESCRIPTOR*) szMMF, varname, (long) type, value, size );
@@ -811,12 +801,11 @@ OUTPUT:
 
 SV *GetVar(IV szMMF, char *varname)
 PREINIT:
-	dMY_CXT;
 	char *data;
 	long size;
 CODE:
 {
-	data = __getvar((MMF_DESCRIPTOR*) szMMF, varname, &size);
+	data = (char *)szMMF + __getvar((MMF_DESCRIPTOR*) szMMF, varname, &size);
     if (data == NULL) {
         XSRETURN_UNDEF;
     }
@@ -829,7 +818,6 @@ OUTPUT:
 
 IV GetVarType(IV szMMF, char *varname)
 PREINIT:
-	dMY_CXT;
 	long type;
 CODE:
 {
@@ -846,7 +834,6 @@ OUTPUT:
 
 IV DeleteVar(IV szMMF, char *varname)
 PREINIT:
-	dMY_CXT;
 	int result;
 CODE:
 {
@@ -854,4 +841,52 @@ CODE:
 }
 OUTPUT:
 	RETVAL
+
+
+=pod 
+
+void SetVarGuts(IV szMMF, char *varname, SV *data)
+PREINIT:
+	dMY_CXT;
+	long *x;
+	MMF_VAR *var;
+	MMF_DESCRIPTOR *mmf;
+	long size;
+CODE:
+{
+    if (data->sv_type == SvPV) {
+
+    printf("%p\n", data->sv_any);
+    x = data->sv_any;
+    printf("%s\n", *x);
+
+    mmf = (MMF_DESCRIPTOR*) szMMF;
+    size = strlen((char *)*x)+1;
+
+    // find or create the variable
+	var = __findvar(mmf, varname);
+	if (!var) var = __createvar(mmf, varname);
+	if (!var) return;
+
+	// allocate memory to hold the variable
+	if (var->v_data == 0) {
+		var->v_data = (long) __malloc(mmf, size);
+	} else {
+        if (var->v_size != size) {
+	       var->v_data = (long) __realloc(mmf, (void *)var->v_data, (unsigned)size);
+	    }
+    }
+
+    var->v_size = size-1;
+    var->v_type = 0;
+
+	if (!var->v_data) return(0);
+
+    // transfer data into the allocated memory
+    memcpy((char *)var->v_data, *x, strlen(*x)+1);
+
+    }
+}
+
+=cut
 

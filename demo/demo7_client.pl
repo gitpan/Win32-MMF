@@ -1,20 +1,5 @@
-# drop in replacement for IPC::Shareable on Windows platform
 use strict;
-
-# ----------------------------------------------------------------
-# code to switch between Win32::MMF::Shareable and IPC::Shareable
-# automatically on different platforms
-# ----------------------------------------------------------------
-use vars qw/ $Shareable /;
-BEGIN {
-    $Shareable = ($^O eq 'MSWin32') ? 'Win32::MMF::Shareable'
-                                    : 'IPC::Shareable';
-    eval "require $Shareable";
-    if ($^O eq 'MSWin32') {
-        Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
-    }
-}
-# ----------------------------------------------------------------
+use Win32::MMF::Shareable;
 
 my $glue = 'data';
 my %options = (
@@ -24,7 +9,7 @@ my %options = (
     destroy   => 0,
     );
 my %colours;
-tie %colours, $Shareable, $glue, { %options } or
+tie %colours, 'Win32::MMF::Shareable', $glue, { %options } or
     die "client: tie failed\n";
 foreach my $c (keys %colours) {
     print "client: these are $c: ",

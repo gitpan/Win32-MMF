@@ -5,8 +5,7 @@ use Data::Dumper;
 
 # DEMO 1 - storing variables and getting them back
 
-my $ns = new Win32::MMF( -namespace => "MyNamespace" )
-    or die "Can not create shared memory";
+my $ns = new Win32::MMF or die "Can not create shared memory";
 
 my $var1 = "Hello world!";
 my $var2 = {

@@ -1,9 +1,7 @@
 use strict;
 use warnings;
-use Win32::MMF::Shareable qw/ Debug /;
+use Win32::MMF::Shareable;
 use CGI;
-
-Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
 
 # Process 1
 
@@ -16,8 +14,10 @@ $sig1 = 1;
 
 while (!$sigM) {}
 
+local $" = ' ';
 for (1..10) {
-    push @array, $_
+    print "proc1 - push [$_]\n";
+    push @array, $_;
 }
 
 # create a shared CGI object to be used by proc 2

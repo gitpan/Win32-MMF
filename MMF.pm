@@ -22,10 +22,10 @@ our @EXPORT_OK = qw/
         Malloc Free DumpHeap
     /;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 our $INITFLAG = 0;       # flag to tell the constructor to initialize MMF
 
-# croak "This module can only be used under Windows!" if $^O ne "MSWin32";
+croak "This module can only be used under Windows!" if $^O ne "MSWin32";
 
 bootstrap Win32::MMF $VERSION;
 
@@ -84,10 +84,13 @@ sub UseNamespace {
 sub new
 {
     my $class = ref($_[0]) || $_[0] || "Win32::MMF";
-    @_ > 1 or croak "Usage: new $class (\$namespace[, \$size[, \$swapfile]])\n";
+    
+    # the constructor can use default namespace if no namespace
+    # is provided by the caller.
+    # @_ > 1 or croak "Usage: new $class (\$namespace[, \$size[, \$swapfile]])\n";
 
     my $self = {
-        _namespace => undef,
+        _namespace => 'shareable',
         _size      => 128 * 1024,  # 128k namespace by default
         _swapfile  => undef,       # use windows virtual memory
         _reuse     => 0,           # reuse existing namespace only
@@ -100,10 +103,11 @@ sub new
         _debug     => 0,           # debug mode indicator
     };
 
-    croak "Namespace must be defined!" if !defined $_[1];
+    # croak "Namespace must be defined!" if !defined $_[1];
 
     my $allowed_parameters = "namespace|size|swapfile|reuse|autolock|timeout|debug";
 
+    if (@_ > 1) {
     if (ref $_[1] eq 'HASH') {
         # Parameters passed in as HASHREF
         for my $p (keys %{$_[1]}) {
@@ -124,8 +128,9 @@ sub new
         (undef, $self->{_namespace}, $self->{_size}, $self->{_swapfile}, $self->{_reuse})
             = @_;
     }
+    }
 
-    croak "Namespace must be defined!" if !$self->{_namespace};
+    # croak "Namespace must be defined!" if !$self->{_namespace};
 
     # turn on/off debug mode
     $self->{_debug} = 1 if $self->{_debug};
@@ -296,33 +301,26 @@ sub debug
 
 =head1 SYNOPSIS
 
- # Object-oriented style
- use Win32::MMF;
+ # ===== Object Oriented Interface =====
+  use Win32::MMF;
 
- # --- in process 1 ---
- my $ns = Win32::MMF->new( -namespace => "MySharedMem" );
+  # --- in process 1 ---
+  my $ns1 = new Win32::MMF;
+  $ns1->setvar('varid', $data);
 
- $ns->setvar('varid', $data);
-
- # --- in process 2 ---
- my $ns = Win32::MMF->new( -namespace => "MySharedMem" );
-
- $data = $ns->getvar('varid');
-
- $ns->deletevar('varid');
+  # --- in process 2 ---
+  my $ns2 = new Win32::MMF;
+  $data = $ns2->getvar('varid');
 
 
- # Tied variable style
- use Win32::MMF::Shareable;
- Win32::MMF::Shareable::Init( -namespace => "MySharedMem" );
+  # ==== Tied Interface ====
+  use Win32::MMF::Shareable;
 
- # --- in process 1 ---
- tie $data, "Win32::MMF::Shareable", "varid";
- $data = 'Hello world!";
+  tie my $s1, "Win32::MMF::Shareable", "varid";
+  $s1 = 'Hello world';
 
- # --- in process 2 ---
- tie $data, "Win32::MMF::Shareable", "varid";
- print "$data\n";
+  tie my $s2, "Win32::MMF::Shareable", "varid";
+  print "$s2\n";    # should print 'Hello world'
 
 
 =head1 ABSTRACT
@@ -332,7 +330,7 @@ for shared memory support under Windows. The core of the module
 is written in XS and is currently supported only under Windows
 NT/2000/XP.
 
-The current version 0.05 of Win32::MMF is available on CPAN at:
+The current version 0.06 of Win32::MMF is available on CPAN at:
 
   http://search.cpan.org/search?query=Win32::MMF
 
@@ -381,7 +379,7 @@ result in object-oriented style:
                              -namespace => "MyDataShare",
                              -size => 2 * 1024 * 1024 )
        or die "Can not create namespace";
-       
+
 Note that there is no need to explicitly unmap the view, close the
 namespace and close the swap file in object-oriented mode, the view,
 namespace and swap file handles are automatically closed-off and
@@ -392,14 +390,11 @@ which virtually eliminates all hassles dealing with shared memory
 under Windows... :-)
 
     use Win32::MMF::Shareable;
-    Win32::MMF::Shareable::Init( -swapfile => "data.swp",
-                                 -namespace => "MyDataShare",
-                                 -size => 2 * 1024 * 1024 )
-       or die "Can not create namespace";
 
     ...
 
-    tie my $scalar, "Win32::MMF::Shareable", "scalar1";
+    tie my $scalar, "Win32::MMF::Shareable", "scalar1",
+                    { namespace => "MyDataShare" };
     $scalar = "Hello world";
 
     tie my %hash = "Win32::MMF::Shareable", "hash1";
@@ -660,19 +655,24 @@ Win32::MMF::Shareable mimics the operation of C<IPC::Shareable>,
 it allows you to tie a variable to a namespace (shared memory)
 making it easy to share its content with other Perl processes.
 
-Note that before trying to tie a variable to a namespace, you need to
-initialize the namespace first. You can do this after the
-I<use Win32::MMF::Shareable;> statement:
+Note that if you try to tie a variable without specifying the 
+namespace, the default namespace 'shareable' will be used. If you
+want to change how the default namespace is created, provide the
+namespace, swapfile and size options when you tie the first variable.
 
  use Win32::MMF::Shareable;
- Win32::MMF::Shareable::Init( -namespace => ... );
+ tie $scalar, "Win32::MMF::Shareable", "var_1",
+              { namespace = 'MyNamespace', size = 1024 * 1024,
+                swapfile = 'C:\private.swp' };
 
 The options are exactly the same as the Win32::MMF constructor options.
+For compatibility with IPC::Shareable, you can pass in IPC::Shareable
+options, although they mostly get ignored, except for the 'key' option.
 
 Currently only scalars, arrays, and hashes can be tied, I am investigating
 on the possibilities with tied file handles at the moment.
 
-To tie a variable to the namespace:
+To tie a variable to the default namespace:
 
  tie $scalar, "Win32::MMF::Shareable", "var_1";
  tie @array,  "Win32::MMF::Shareable", "var_2";
@@ -723,8 +723,6 @@ And to use a tied variable:
  use warnings;
  use Win32::MMF::Shareable;
 
- Win32::MMF::Shareable::Init( -namespace => 'MySharedmem' );
-
  defined(my $pid = fork()) or die "Can not fork a child process!";
 
  if (!$pid) {
@@ -751,7 +749,7 @@ And to use a tied variable:
 
 =head1 SEE ALSO
 
-C<Win32::MMF::Shareable>
+C<Win32::MMF::Shareable>, C<Storable>
 
 =head1 CREDITS
 

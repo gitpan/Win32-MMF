@@ -5,8 +5,7 @@ use Data::Dumper;
 
 # DEMO 2 - Variable management
 
-my $ns = new Win32::MMF( -namespace => "MyNamespace" )
-    or die "Can not create shared memory";
+my $ns = new Win32::MMF or die "Can not create shared memory";
 
 for (1 .. 10) {
     $ns->setvar("Var$_", $_);
