@@ -41,7 +41,7 @@ sub STORE_direct
 }
 
 cmpthese( timethese (
-     500000,
+     1000000,
      {
         'setvar' => '&STORE_setvar',
         'tiedvar' => '&STORE_tiedvar',

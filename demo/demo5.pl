@@ -1,12 +1,13 @@
 use strict;
 use warnings;
-use Win32::MMF::Shareable;
 
 # Signaling with tied shared variables
 
 defined(my $pid = fork()) or die "Can not fork a child process!";
 
 if (!$pid) {
+    require Win32::MMF::Shareable;
+
     tie my $sig1, "Win32::MMF::Shareable", '$signal1';
     tie my $sig2, "Win32::MMF::Shareable", '$signal2';
 
@@ -16,6 +17,8 @@ if (!$pid) {
 
     $sig1 = 1;
 } else {
+    require Win32::MMF::Shareable;
+
     tie my $sig1, "Win32::MMF::Shareable", '$signal1';
     tie my $sig2, "Win32::MMF::Shareable", '$signal2';
 

@@ -1,7 +1,7 @@
 #! /usr/bin/perl
 
 use strict;
-use Win32::MMF::Shareable;
+use warnings;
 
 $|++;
 
@@ -10,31 +10,29 @@ my $i = 0;
 
 if( fork )
 {
-  my %share;
-  my $ns = tie( %share, 'Win32::MMF::Shareable', 'share' ) || die;
-  print $ns->namespace()->{_view}, "\n";
+  require Win32::MMF::Shareable;
+  my $ns = tie( my %share, 'Win32::MMF::Shareable', 'share' ) || die;
 
-  select( undef, undef, undef, $delay / 2 );
+  # select( undef, undef, undef, $delay / 2 );
   while( $i < 20 )
   {
     $ns->lock();
     $share{ 'P' . $i++ } = '-';
-    print "parent($i): " . join( '', values( %share ) ) . "\n";
+    print "parent($i)\t" . join( '', values( %share ) ) . "\n";
     $ns->unlock();
     select( undef, undef, undef, $delay );
   }
 }
 else
 {
-  my %share;
-  my $ns = tie( %share, 'Win32::MMF::Shareable', 'share' ) || die;
-  print $ns->namespace()->{_view}, "\n";
+  require Win32::MMF::Shareable;
+  my $ns = tie( my %share, 'Win32::MMF::Shareable', 'share' ) || die;
 
   while( $i < 20 )
   {
   	$ns->lock();
   	$share{ 'P' . $i++ } = '#';
-    print "child($i) : " . join( '', values( %share ) ) . "\n";
+    print "child($i)\t" . join( '', values( %share ) ) . "\n";
     $ns->unlock();
     select( undef, undef, undef, $delay );
   }

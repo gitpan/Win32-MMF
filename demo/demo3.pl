@@ -1,17 +1,16 @@
 use strict;
 use warnings;
-use Win32::MMF;
 use Data::Dumper;
 use CGI;
 
 # Process synchronization between processes
 # Object Oriented Approach
 
-
 # fork a process
 defined(my $pid = fork()) or die "Can not fork a child process!";
 
 if ($pid) {
+   require Win32::MMF;
    my $ns1 = new Win32::MMF;
 
    my $cgi = new CGI;
@@ -38,7 +37,7 @@ if ($pid) {
    $ns1->debug();
 
 } else {
-
+   require Win32::MMF;
    my $ns1 = new Win32::MMF;
 
    while (!$ns1->getvar("SIG")) {};

@@ -1,12 +1,12 @@
 use strict;
 use warnings;
 use Test::More tests => 1;
-use Win32::MMF::Shareable;
 
 $|++;
 
 if( fork )  # parent
 {
+  require Win32::MMF::Shareable;
   tie( my @share, 'Win32::MMF::Shareable', 'share' ) || die;
   tie( my $sig, 'Win32::MMF::Shareable', 'sig' ) || die;
   while (!$sig) {};
@@ -15,6 +15,7 @@ if( fork )  # parent
 }
 else        # child
 {
+  require Win32::MMF::Shareable;
   tie( my @share, 'Win32::MMF::Shareable', 'share' ) || die;
   tie( my $sig, 'Win32::MMF::Shareable', 'sig' ) || die;
   $sig = 1;
@@ -22,3 +23,5 @@ else        # child
   push @share, 'child';
   is(scalar @share, 2, "Shared array OK");
 }
+
+unlink "C:/private.swp";
